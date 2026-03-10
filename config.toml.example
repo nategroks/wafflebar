@@ -1,0 +1,37 @@
+# wafflebar configuration
+# Place this file at ~/.config/wafflebar/config.toml
+
+[panel]
+# Panel position: "top" or "bottom"
+position = "top"
+# Panel height in pixels
+height = 32
+# Monitor selection: "all", "primary", or monitor name
+monitor = "all"
+# Icon theme name (freedesktop icon theme spec)
+icon_theme = "hicolor"
+
+[theme]
+# Background color (hex)
+background = "#2e3440"
+# Foreground/text color (hex)
+foreground = "#eceff4"
+# Font family
+font_family = "sans-serif"
+# Font size in pixels
+font_size = 14.0
+# Renderer backend: "auto", "cpu", or "gpu"
+renderer = "auto"
+
+# Widget segments: left, center, right
+# Each segment contains an ordered list of widgets.
+
+# Example: clock on the right side
+[[segments.right]]
+widget = "clock"
+format = "%H:%M"
+
+# Example: clock with date on the center
+# [[segments.center]]
+# widget = "clock"
+# format = "%Y-%m-%d %H:%M:%S"

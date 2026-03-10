@@ -1,0 +1,20 @@
+[package]
+name = "wafflebar-core"
+description = "Core types, traits, config, icons, and rendering for wafflebar"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+tiny-skia.workspace = true
+wgpu.workspace = true
+pollster.workspace = true
+cosmic-text.workspace = true
+resvg.workspace = true
+serde.workspace = true
+toml.workspace = true
+tracing.workspace = true
+dirs.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+chrono.workspace = true

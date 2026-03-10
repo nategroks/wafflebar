@@ -1,0 +1,11 @@
+[package]
+name = "wafflebar-widgets"
+description = "Built-in widgets for wafflebar"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+wafflebar-core.workspace = true
+chrono.workspace = true
+tracing.workspace = true

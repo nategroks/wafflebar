@@ -1,0 +1,58 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/wafflebar",
+    "crates/wafflebar-core",
+    "crates/wafflebar-x11",
+    "crates/wafflebar-widgets",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "GPL-2.0"
+rust-version = "1.80"
+
+[workspace.dependencies]
+# Rendering
+tiny-skia = "0.11"
+wgpu = "28"
+pollster = "0.4"
+
+# Text
+cosmic-text = "0.18"
+
+# SVG
+resvg = "0.46"
+
+# D-Bus
+zbus = { version = "5", default-features = false, features = ["tokio"] }
+
+# X11
+x11rb = { version = "0.13", features = ["shm", "randr", "render"] }
+
+# Async
+tokio = { version = "1", features = ["full"] }
+
+# Serialization / config
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Time
+chrono = "0.4"
+
+# XDG directories
+dirs = "6"
+
+# Error handling
+anyhow = "1"
+thiserror = "2"
+
+# Workspace crates
+wafflebar-core = { path = "crates/wafflebar-core" }
+wafflebar-x11 = { path = "crates/wafflebar-x11" }
+wafflebar-widgets = { path = "crates/wafflebar-widgets" }
