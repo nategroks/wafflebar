@@ -30,10 +30,10 @@ struct Cli {
 
 fn main() -> Result<()> {
     // GTK4's default Vulkan renderer spams `VK_SUBOPTIMAL_KHR` on NVIDIA + wlroots
-    // layer-shell surfaces. A status bar doesn't need Vulkan, so default to the GL
-    // renderer — unless the user has explicitly chosen one via GSK_RENDERER.
+    // layer-shell surfaces. A status bar doesn't need Vulkan, so default to the new
+    // OpenGL renderer ("ngl" — note plain "gl" warns on GTK >= 4.18). User override honored.
     if std::env::var_os("GSK_RENDERER").is_none() {
-        std::env::set_var("GSK_RENDERER", "gl");
+        std::env::set_var("GSK_RENDERER", "ngl");
     }
 
     tracing_subscriber::fmt()

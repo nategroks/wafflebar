@@ -56,7 +56,8 @@ fn default_schema() -> u32 {
 /// Where the bar sits and how it looks.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BarConfig {
-    /// Which monitor(s): `"all"` (default), or a connector name / EDID serial.
+    /// Which monitor(s): `"primary"` (default) / `"left"` / `"center"` / `"right"` (by layout
+    /// position), `"all"` (one bar per monitor), or an exact connector / model name.
     #[serde(default = "default_monitor")]
     pub monitor: String,
     /// Top or bottom edge.
@@ -82,7 +83,8 @@ impl Default for BarConfig {
 }
 
 fn default_monitor() -> String {
-    "all".to_string()
+    // Panels default to a single screen (like xfce4-panel / plasma); use "all" for one per monitor.
+    "primary".to_string()
 }
 fn default_height() -> u32 {
     26
