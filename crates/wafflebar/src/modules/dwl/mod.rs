@@ -3,3 +3,4 @@
 //! `taskbar`.
 
 pub mod tags;
+pub mod window;
