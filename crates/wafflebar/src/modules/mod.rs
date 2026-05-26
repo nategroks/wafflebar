@@ -5,6 +5,7 @@
 //! usable bar and the grid layout is visible. Real implementations land in M2/M3.
 
 pub mod clock;
+pub mod dwl; // Module-trait implementations (tags, …); wired into the host renderer next.
 
 use gtk4::prelude::*;
 use gtk4::Widget;
