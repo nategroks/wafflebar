@@ -29,6 +29,13 @@ struct Cli {
 }
 
 fn main() -> Result<()> {
+    // GTK4's default Vulkan renderer spams `VK_SUBOPTIMAL_KHR` on NVIDIA + wlroots
+    // layer-shell surfaces. A status bar doesn't need Vulkan, so default to the GL
+    // renderer — unless the user has explicitly chosen one via GSK_RENDERER.
+    if std::env::var_os("GSK_RENDERER").is_none() {
+        std::env::set_var("GSK_RENDERER", "gl");
+    }
+
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::try_from_env("WAFFLEBAR_LOG").unwrap_or_else(|_| EnvFilter::new("info")))
         .init();
