@@ -1,0 +1,14 @@
+[package]
+name = "wafflebar-core"
+description = "Core library for wafflebar: config schema, grid layout engine, and shared types (GTK-free)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+serde.workspace = true
+toml.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
