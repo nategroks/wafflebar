@@ -17,7 +17,7 @@ schema = 1     # required-ish; defaults to the current version if omitted
 
 | Key | Type | Default | Meaning |
 |-----|------|---------|---------|
-| `monitor` | string | `"all"` | `"all"`, or a connector name (`DP-1`) / monitor model to limit the bar to |
+| `monitor` | string | `"primary"` | `"primary"`/`"left"`/`"center"`/`"right"` (by layout position — survives NVIDIA connector renaming), `"all"` (one bar per monitor), or an exact connector (`DP-1`) / model name |
 | `position` | `"top"` \| `"bottom"` | `"top"` | which screen edge the bar docks to |
 | `height` | integer | `26` | bar thickness in px (also the layer-shell exclusive zone) |
 | `theme` | string | _(built-in Nord)_ | path to a GTK4 CSS file |
