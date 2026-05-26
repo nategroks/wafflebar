@@ -1,21 +1,31 @@
-//! Core library for **wafflebar** — a griddy Wayland status bar.
+//! Core library for **wafflebar** — a desktop panel for tiling window managers.
 //!
-//! This crate is deliberately **GTK-free** so it can be unit-tested in isolation and
-//! reused by the future `wafflebar-config` GUI (Part B). It owns three things:
+//! This crate is deliberately **GTK-free** (a hard invariant — see `docs/ARCHITECTURE.md`) so
+//! the whole module boundary is serializable and the eventual external-process isolation step is
+//! a transport wrapper, not a rewrite. It owns:
 //!
 //! - [`config`] — the on-disk TOML schema (versioned) and its loader.
-//! - [`grid`] — the grid layout engine: validates module placements against the
-//!   configured `rows × columns` track and detects out-of-bounds / overlapping cells.
-//! - shared value types re-exported below.
+//! - [`grid`] — the grid layout engine (validates module placements on the `rows × columns` track).
+//! - [`view`] — [`View`], the GTK-free UI *description* a module returns.
+//! - [`wm`] — the [`WindowManager`] abstraction (Cairo-Dock GLDI model): events, commands, types.
+//! - [`module`] — the [`Module`] reducer contract (events in → `View` + `Reaction` out).
+//! - [`fake`] — a scriptable [`WindowManager`] for tests.
 //!
-//! The GTK4 front-end (`wafflebar` binary) consumes [`grid::GridEngine`] to lay widgets
-//! out on a `gtk::Grid`, and never re-implements placement logic itself.
+//! The GTK4 front-end (`wafflebar` binary) is the *host*: it renders `View`s to widgets, owns the
+//! widget tree, runs the GLib main loop, and provides the concrete compositor backends.
 
 pub mod config;
+pub mod fake;
 pub mod grid;
+pub mod module;
+pub mod view;
+pub mod wm;
 
 pub use config::{
     Align, BarConfig, Cell, Config, ConfigError, GridConfig, ModuleConfig, Position,
     SCHEMA_VERSION,
 };
 pub use grid::{GridEngine, GridError, Placement};
+pub use module::{Event, Module, Reaction, Topic};
+pub use view::{ActionId, View};
+pub use wm::{Output, Tag, TagState, Window, WindowId, WindowManager, WmCommand, WmEvent};
