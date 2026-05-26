@@ -1,0 +1,36 @@
+/* wafflebar — built-in Nord theme (mirrors the prior waybar look).
+ * GTK4 CSS. Override by pointing `bar.theme` at your own file. */
+
+window#wafflebar {
+    background-color: #2e3440;
+    color: #d8dee9;
+    font-family: "Hurmit Nerd Font Mono", "Fira Code", monospace;
+    font-size: 13px;
+}
+
+#grid {
+    margin: 0 4px;
+}
+
+.module {
+    padding: 0 8px;
+}
+
+.clock {
+    color: #88c0d0;
+    font-weight: bold;
+}
+
+.placeholder {
+    color: #4c566a;
+    font-style: italic;
+}
+
+/* per-module accent colors (used as modules land in M2/M3) */
+.cpu        { color: #a3be8c; }
+.memory     { color: #ebcb8b; }
+.network    { color: #81a1c1; }
+.pulseaudio { color: #b48ead; }
+.pulseaudio.muted { color: #bf616a; }
+.tags .occupied { color: #88c0d0; }
+.tags .urgent   { color: #bf616a; }
