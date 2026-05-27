@@ -30,7 +30,13 @@ use crate::wm::DwlBackend;
 const DEFAULT_CSS: &str = include_str!("../../../themes/nord.css");
 
 /// Build the bar(s) on the selected monitor(s), wiring each to the shared dwl backend.
-pub fn build_bars(app: &Application, config: &Config, engine: &GridEngine) {
+/// `config_path` (when present) is watched for live reload.
+pub fn build_bars(
+    app: &Application,
+    config: &Config,
+    engine: &GridEngine,
+    config_path: Option<&std::path::Path>,
+) {
     let Some(display) = gdk::Display::default() else {
         warn!("no GDK display; cannot create bars");
         return;
@@ -62,14 +68,14 @@ pub fn build_bars(app: &Application, config: &Config, engine: &GridEngine) {
     }
     if mons.is_empty() {
         warn!("no monitors reported; creating a single unanchored bar");
-        present_bar(app, None, config, engine, &backend);
+        present_bar(app, None, config, engine, &backend, config_path);
         return;
     }
 
     let targets = select_monitors(&mons, &config.bar.monitor);
     info!(want = config.bar.monitor, selected = targets.len(), total = mons.len(), "monitor selection");
     for mon in targets {
-        present_bar(app, Some(&mon), config, engine, &backend);
+        present_bar(app, Some(&mon), config, engine, &backend, config_path);
     }
 }
 
@@ -109,6 +115,7 @@ fn present_bar(
     config: &Config,
     engine: &GridEngine,
     backend: &Option<Rc<RefCell<DwlBackend>>>,
+    config_path: Option<&std::path::Path>,
 ) {
     let output_name = monitor
         .and_then(gdk::Monitor::connector)
@@ -168,6 +175,11 @@ fn present_bar(
             host_t.deliver_event(&Event::Tick { secs });
             glib::ControlFlow::Continue
         });
+    }
+
+    // Live config reload: re-apply option edits without a restart (F2).
+    if let Some(path) = config_path {
+        crate::config_reload::watch_config(path.to_path_buf(), host.clone(), config.clone());
     }
 }
 

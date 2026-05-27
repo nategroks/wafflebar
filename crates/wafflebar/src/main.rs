@@ -5,6 +5,7 @@
 //! which owns all GTK/layer-shell concerns.
 
 mod app;
+mod config_reload;
 mod event_loop;
 mod plugins;
 mod render;
@@ -45,7 +46,7 @@ fn main() -> Result<()> {
         .init();
 
     let cli = Cli::parse();
-    let config = load_config(cli.config)?;
+    let (config, config_path) = load_config(cli.config)?;
 
     // Validate the grid up front so a bad layout fails before we open any windows.
     let engine = GridEngine::build(&config).context("invalid bar layout")?;
@@ -57,7 +58,7 @@ fn main() -> Result<()> {
 
     let app = Application::builder().application_id(APP_ID).build();
     app.connect_activate(move |app| {
-        app::build_bars(app, &config, &engine);
+        app::build_bars(app, &config, &engine, config_path.as_deref());
     });
 
     // We parse our own args with clap, so don't let GTK touch argv.
@@ -66,21 +67,23 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-/// Load config from an explicit path, the XDG default, or fall back to a built-in default.
-fn load_config(explicit: Option<PathBuf>) -> Result<Config> {
+/// Load config from an explicit path, the XDG default, or fall back to a built-in default. Returns
+/// the path it loaded from (for the live-reload watcher) — `None` when running on defaults.
+fn load_config(explicit: Option<PathBuf>) -> Result<(Config, Option<PathBuf>)> {
     let path = explicit.or_else(default_config_path);
     match path {
         Some(p) if p.exists() => {
             info!(path = %p.display(), "loading config");
-            Config::load(&p).with_context(|| format!("loading config {}", p.display()))
+            let cfg = Config::load(&p).with_context(|| format!("loading config {}", p.display()))?;
+            Ok((cfg, Some(p)))
         }
         Some(p) => {
             warn!(path = %p.display(), "no config file; using built-in default");
-            Ok(Config::default())
+            Ok((Config::default(), None))
         }
         None => {
             warn!("could not determine config path; using built-in default");
-            Ok(Config::default())
+            Ok((Config::default(), None))
         }
     }
 }
