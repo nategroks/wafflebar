@@ -50,6 +50,11 @@ window#wafflebar {
 }
 .wb-menu-item:hover { background-color: #434c5e; }
 
+/* network: connection icon + name; click opens the editor */
+.network { padding: 0 6px; }
+.network .net-icon { color: #81a1c1; }
+.network .net-label { color: #d8dee9; }
+
 /* volume: icon + percent; scroll to change, click to mute */
 .volume { padding: 0 6px; }
 .volume .vol-icon { color: #88c0d0; }
