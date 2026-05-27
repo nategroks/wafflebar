@@ -59,6 +59,15 @@ future callback-style FFI (libnm, libpipewire, …). (Aside: a dev box with no a
 this on the CONNECTING→FAILED transition; a live server would have hit the same panic on
 CONNECTING→READY — the missing happy-path environment bought the bug early.)
 
+## Scroll affordance
+Scroll on a `Button` is two optional `ActionId`s (`scroll_up`/`scroll_down`), not a `delta` value.
+Discrete-by-construction: the renderer accumulates GTK4 smooth-scroll (`Cell<f64>` remainder) and
+dispatches one action per whole tick, so plugins never see sub-tick deltas (five-percent-per-tick
+volume, one-item-per-tick lists). Crucially this routes through the *same* `ActionId` dispatch as
+click/menu/key, so a new scroll consumer needs no new dispatch path and composes with everything
+`Button` already does. Direction is GTK4-normalized (device + natural-scroll applied); v1 always
+consumes — `TODO(scroll)` a `handled` flag when nested scrollables ship.
+
 ## Roadmap (phases, each tied to a real directory)
 - **A** finish M2 — `tasklist` (this PR).
 - **B** plugin framework — `Plugin::configure` (per-instance TOML + `notify` live-reload), `launcher`, `separator`/`showdesktop`.
