@@ -11,7 +11,9 @@
 //! and menu. One daemon per session — if another already owns the name we don't fight it (unless
 //! `--replace-notifications`).
 
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::rc::Rc;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
@@ -67,6 +69,11 @@ impl NotificationsIface {
             .unwrap_or_default();
         // actions arrive flat: [key, label, key, label, …]. Odd trailing entries are dropped.
         let actions = actions.chunks_exact(2).map(|c| (c[0].clone(), c[1].clone())).collect();
+        let image_path = hints
+            .get("image-path")
+            .or_else(|| hints.get("image_path"))
+            .and_then(|v| <&str>::try_from(v).ok())
+            .map(str::to_string);
         let notification = Notification {
             id,
             app_name,
@@ -76,6 +83,7 @@ impl NotificationsIface {
             actions,
             urgency,
             timeout: Timeout::from_spec(expire_timeout),
+            image_path,
         };
         let _ = self.tx.send(ServerOp::Post(notification)).await;
         id
@@ -108,14 +116,50 @@ impl NotificationsIface {
     async fn action_invoked(emitter: &SignalEmitter<'_>, id: u32, action_key: String) -> zbus::Result<()>;
 }
 
-/// Start the notification server on the GLib main context. `replace` takes the name from an existing
-/// daemon (`--replace-notifications`); otherwise we don't fight one. `deliver` receives each op on
-/// the main thread.
-pub fn start(replace: bool, deliver: impl Fn(ServerOp) + 'static) {
-    glib::spawn_future_local(run(replace, deliver));
+/// The server handle held by the host. Keeps the connection (set once acquired) so the popup UI can
+/// emit `NotificationClosed` / `ActionInvoked` back to clients when the user dismisses or acts.
+pub struct NotifyServer {
+    conn: RefCell<Option<Connection>>,
 }
 
-async fn run(replace: bool, deliver: impl Fn(ServerOp) + 'static) {
+impl NotifyServer {
+    pub fn new() -> Rc<Self> {
+        Rc::new(Self { conn: RefCell::new(None) })
+    }
+
+    /// Start on the GLib main context. `replace` takes the name from an existing daemon
+    /// (`--replace-notifications`); otherwise we don't fight one. `deliver` receives each op on the
+    /// main thread.
+    pub fn start(self: &Rc<Self>, replace: bool, deliver: impl Fn(ServerOp) + 'static) {
+        glib::spawn_future_local(run(self.clone(), replace, deliver));
+    }
+
+    /// Emit `ActionInvoked(id, key)` (a popup action was clicked).
+    pub fn emit_action(&self, id: u32, key: &str) {
+        let (conn, key) = (self.conn.borrow().clone(), key.to_string());
+        if let Some(conn) = conn {
+            glib::spawn_future_local(async move {
+                if let Ok(emitter) = SignalEmitter::new(&conn, PATH) {
+                    let _ = NotificationsIface::action_invoked(&emitter, id, key).await;
+                }
+            });
+        }
+    }
+
+    /// Emit `NotificationClosed(id, reason)` (expired, dismissed, …).
+    pub fn emit_closed(&self, id: u32, reason: CloseReason) {
+        let conn = self.conn.borrow().clone();
+        if let Some(conn) = conn {
+            glib::spawn_future_local(async move {
+                if let Ok(emitter) = SignalEmitter::new(&conn, PATH) {
+                    let _ = NotificationsIface::notification_closed(&emitter, id, reason.code()).await;
+                }
+            });
+        }
+    }
+}
+
+async fn run(server: Rc<NotifyServer>, replace: bool, deliver: impl Fn(ServerOp) + 'static) {
     let conn = match Connection::session().await {
         Ok(c) => c,
         Err(e) => return warn!(error = %e, "notifications: no session bus; disabled"),
@@ -141,6 +185,7 @@ async fn run(replace: bool, deliver: impl Fn(ServerOp) + 'static) {
             return;
         }
     }
+    *server.conn.borrow_mut() = Some(conn);
 
     // Drain ops to the host on the main thread for the process lifetime.
     while let Ok(op) = rx.recv().await {

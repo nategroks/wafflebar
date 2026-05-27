@@ -74,6 +74,9 @@ pub struct Notification {
     pub actions: Vec<(String, String)>,
     pub urgency: Urgency,
     pub timeout: Timeout,
+    /// The `image-path` hint (a path or `file://` URI), preferred over `app_icon` for the popup
+    /// image. (The raw `image-data` hint — an inline RGBA pixmap — is a TODO follow-up.)
+    pub image_path: Option<String>,
 }
 
 #[cfg(test)]
