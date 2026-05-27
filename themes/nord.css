@@ -50,6 +50,11 @@ window#wafflebar {
 }
 .wb-menu-item:hover { background-color: #434c5e; }
 
+/* statustray: SNI item icons */
+.statustray { padding: 0 4px; }
+.tray-item { padding: 0 3px; border-radius: 4px; }
+.tray-item:hover { background-color: #3b4252; }
+
 /* cpu: aggregate load percent; bucket classes tint as it climbs */
 .cpu { padding: 0 6px; }
 .cpu .cpu-icon { color: #b48ead; }

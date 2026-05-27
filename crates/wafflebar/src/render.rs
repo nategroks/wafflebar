@@ -14,7 +14,7 @@ use tracing::debug;
 use wafflebar_core::reconcile::child_key;
 use wafflebar_core::{
     diff_children, ActionId, ChildPatch, Event, Launch, ListPatch, MenuItem, Plugin, Position,
-    Reaction, SeparatorStyle, Topic, View, VolumeCommand, WmCommand,
+    Reaction, SeparatorStyle, Topic, TrayCommand, View, VolumeCommand, WmCommand,
 };
 
 /// One placed module: its kind (for logging), the boxed reducer, and the host-owned container
@@ -37,6 +37,8 @@ pub struct Host {
     launch_sink: Box<dyn Fn(&Launch)>,
     /// Where `VolumeCommand`s go (wired to the audio backend, or a no-op when none is running).
     volume_sink: Box<dyn Fn(&VolumeCommand)>,
+    /// Where `TrayCommand`s go (wired to the SNI backend, or a no-op when none is running).
+    tray_sink: Box<dyn Fn(&TrayCommand)>,
     /// The bar's edge. Popovers open away from it (read at render time so a Phase F edge change is
     /// picked up without a stale cached anchor).
     position: Position,
@@ -48,6 +50,7 @@ impl Host {
         command_sink: Box<dyn Fn(&WmCommand)>,
         launch_sink: Box<dyn Fn(&Launch)>,
         volume_sink: Box<dyn Fn(&VolumeCommand)>,
+        tray_sink: Box<dyn Fn(&TrayCommand)>,
         position: Position,
     ) -> Rc<Self> {
         Rc::new(Self {
@@ -55,6 +58,7 @@ impl Host {
             command_sink,
             launch_sink,
             volume_sink,
+            tray_sink,
             position,
         })
     }
@@ -122,6 +126,9 @@ impl Host {
         }
         for cmd in &reaction.volume {
             (self.volume_sink)(cmd);
+        }
+        for cmd in &reaction.tray {
+            (self.tray_sink)(cmd);
         }
         if reaction.dirty {
             self.rerender(slot);
@@ -458,6 +465,7 @@ mod tests {
             Box::new(|_: &WmCommand| {}),
             Box::new(|_: &Launch| {}),
             Box::new(|_: &VolumeCommand| {}),
+            Box::new(|_: &TrayCommand| {}),
             Position::Top,
         )
     }

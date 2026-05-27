@@ -12,6 +12,7 @@ pub mod memory;
 pub mod network;
 pub mod separator;
 pub mod showdesktop;
+pub mod statustray;
 pub mod tasklist;
 pub mod volume;
 
@@ -44,6 +45,7 @@ pub fn build(kind: &str, output: &str, cfg: &ModuleConfig, caps: &Caps) -> Box<d
         "network" => Box::new(network::Network::new()),
         "memory" => Box::new(memory::Memory::new()),
         "cpu" => Box::new(cpu::Cpu::new()),
+        "statustray" => Box::new(statustray::StatusTray::new()),
         other => Box::new(Placeholder::new(other)),
     }
 }

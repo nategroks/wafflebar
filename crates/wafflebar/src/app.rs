@@ -12,8 +12,8 @@ use gtk4::{Application, ApplicationWindow, CssProvider, Grid, Orientation};
 use gtk4_layer_shell::{Edge, Layer, LayerShell};
 use tracing::{debug, info, warn};
 use wafflebar_core::{
-    Align, Config, Event, GridEngine, Launch, Position, Topic, VolumeCommand, WindowManager,
-    WmCommand,
+    Align, Config, Event, GridEngine, Launch, Position, Topic, TrayCommand, VolumeCommand,
+    WindowManager, WmCommand,
 };
 
 use crate::event_loop;
@@ -21,6 +21,7 @@ use crate::plugins;
 use crate::plugins::cpu::backend::{CpuBackend, ProcStatBackend};
 use crate::plugins::memory::backend::{MemoryBackend, ProcMemBackend};
 use crate::plugins::network::backend::{NetworkBackend, NmBackend};
+use crate::plugins::statustray::backend::SniBackend;
 use crate::plugins::volume::backend::PulseBackend;
 use crate::render::{Host, PluginSlot};
 use crate::wm::DwlBackend;
@@ -251,6 +252,7 @@ fn build_grid_and_host(
     let needs_network = subscribes(&Topic::Network);
     let needs_memory = subscribes(&Topic::Memory);
     let needs_cpu = subscribes(&Topic::Cpu);
+    let needs_tray = subscribes(&Topic::Tray);
     let audio = if needs_audio {
         PulseBackend::new().map(|b| Rc::new(RefCell::new(b)))
     } else {
@@ -264,7 +266,27 @@ fn build_grid_and_host(
         None => Box::new(|_| {}),
     };
 
-    let host = Host::new(slots, command_sink, launch_sink, volume_sink, config.bar.position);
+    // SNI tray backend: created before the host (so tray_sink can hold it), started after (so its
+    // emit can hold a Weak<Host>) — same shape as the audio backend.
+    let tray = needs_tray.then(|| Rc::new(SniBackend::new()));
+    let tray_sink: Box<dyn Fn(&TrayCommand)> = match &tray {
+        Some(b) => {
+            let b = b.clone();
+            Box::new(move |cmd| match cmd {
+                TrayCommand::Activate { key } => b.activate(key),
+            })
+        }
+        None => Box::new(|_| {}),
+    };
+
+    let host = Host::new(
+        slots,
+        command_sink,
+        launch_sink,
+        volume_sink,
+        tray_sink,
+        config.bar.position,
+    );
 
     // Forward audio events into the host. `Weak` breaks the host → volume_sink → backend →
     // handler → host cycle.
@@ -286,6 +308,16 @@ fn build_grid_and_host(
                 h.deliver_event(&Event::Network(state));
             }
         })));
+    }
+
+    // Start the tray backend now that the host exists (emit holds a Weak<Host>).
+    if let Some(b) = &tray {
+        let host_weak = Rc::downgrade(&host);
+        b.start(Rc::new(move |items| {
+            if let Some(h) = host_weak.upgrade() {
+                h.deliver_event(&Event::Tray(items));
+            }
+        }));
     }
 
     // Memory backend: polls /proc/meminfo on a GLib timer at the configured interval (5s default).
