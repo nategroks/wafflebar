@@ -7,7 +7,9 @@
 //! activation (DBus or spawn) is the host executor's job; see `src/shell/executor.rs`.
 
 use tracing::warn;
-use wafflebar_core::{ActionId, DesktopApp, Event, MenuItem, Plugin, Reaction, Topic, View};
+use wafflebar_core::{
+    ActionId, ConfigField, DesktopApp, Event, MenuItem, Plugin, Reaction, Topic, View,
+};
 
 /// Default pixel size for launcher icons (override with `icon_size` in config).
 const DEFAULT_ICON_SIZE: u32 = 20;
@@ -119,6 +121,16 @@ impl Plugin for Launcher {
         // Config-only: reconstruct, re-resolving the .desktop `items` against the new config.
         *self = Self::new(cfg);
         Reaction::dirty()
+    }
+
+    fn config_schema(&self) -> Vec<ConfigField> {
+        // The `items` list is a `.desktop` picker — that's F4's Add Items dialog, not an F3 form
+        // field. Surface the limitation and its closer rather than a half-built list editor.
+        vec![ConfigField::note(
+            "items",
+            "Items",
+            "Edit items in the config file — visual editing comes with Add Items.",
+        )]
     }
 }
 

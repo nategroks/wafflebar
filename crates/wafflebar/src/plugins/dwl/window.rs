@@ -4,7 +4,9 @@
 //! `max_chars` config truncates long titles with an ellipsis (kept in the description rather
 //! than relying on host CSS so the truncation is testable and toolkit-independent).
 
-use wafflebar_core::{ActionId, Event, ModuleConfig, Plugin, Reaction, Topic, View, WmEvent};
+use wafflebar_core::{
+    ActionId, ConfigField, Event, ModuleConfig, Plugin, Reaction, Topic, View, WmEvent,
+};
 
 /// Read the `max_chars` option (0 = no truncation). Shared by the registry (construction) and
 /// `configure` (reload) so the extraction lives in one place.
@@ -78,6 +80,10 @@ impl Plugin for Window {
         // Re-read the option; `output` (placement) and runtime title/app_id are preserved.
         self.max_chars = read_max_chars(cfg);
         Reaction::dirty()
+    }
+
+    fn config_schema(&self) -> Vec<ConfigField> {
+        vec![ConfigField::int("max_chars", "Max characters (0 = unlimited)", 0, 200, 0)]
     }
 }
 

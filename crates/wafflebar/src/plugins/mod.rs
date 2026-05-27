@@ -16,7 +16,7 @@ pub mod statustray;
 pub mod tasklist;
 pub mod volume;
 
-use wafflebar_core::{ActionId, Event, ModuleConfig, Plugin, Reaction, Topic, View};
+use wafflebar_core::{ActionId, ConfigField, Event, ModuleConfig, Plugin, Reaction, Topic, View};
 
 /// Backend capabilities handed to plugins at construction — things a plugin can't derive from its
 /// own config and that depend on which compositor is running (e.g. whether show-desktop works).
@@ -42,6 +42,14 @@ pub fn build(kind: &str, output: &str, cfg: &ModuleConfig, caps: &Caps) -> Box<d
         "statustray" => Box::new(statustray::StatusTray::new()),
         other => Box::new(Placeholder::new(other)),
     }
+}
+
+/// The config schema a module kind exposes to the preferences UI (F3). Builds a throwaway reducer
+/// with empty options — schemas are static (they describe fields, not values), so output/caps and
+/// the absent values don't affect the result — and returns its declared fields. Unknown kinds and
+/// option-less modules yield no fields.
+pub fn config_schema(kind: &str) -> Vec<ConfigField> {
+    build(kind, "", &ModuleConfig::bare(kind), &Caps::default()).config_schema()
 }
 
 /// Build a `ModuleConfig` with the given options for tests (the `configure` migration tests).
@@ -86,5 +94,35 @@ impl Plugin for Placeholder {
     }
     fn on_action(&mut self, _action: &ActionId) -> Reaction {
         Reaction::none()
+    }
+}
+
+#[cfg(test)]
+mod schema_tests {
+    use super::config_schema;
+    use wafflebar_core::FieldKind;
+
+    #[test]
+    fn schemas_describe_known_option_keys() {
+        let clock = config_schema("clock");
+        assert_eq!(clock.len(), 1);
+        assert_eq!(clock[0].key, "format");
+        assert!(matches!(clock[0].kind, FieldKind::Text { .. }));
+
+        assert!(config_schema("separator")
+            .iter()
+            .any(|f| f.key == "style" && matches!(f.kind, FieldKind::Choice { .. })));
+        assert!(config_schema("separator")
+            .iter()
+            .any(|f| f.key == "expand" && matches!(f.kind, FieldKind::Bool { .. })));
+        assert!(config_schema("memory")
+            .iter()
+            .any(|f| f.key == "interval" && matches!(f.kind, FieldKind::Int { .. })));
+        // Launcher's items are an app-picker (F4) → a Note placeholder, not an editable field.
+        assert!(matches!(config_schema("launcher")[0].kind, FieldKind::Note(_)));
+
+        // Option-less and unknown kinds expose nothing.
+        assert!(config_schema("volume").is_empty());
+        assert!(config_schema("nonexistent").is_empty());
     }
 }
