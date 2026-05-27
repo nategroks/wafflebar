@@ -6,6 +6,7 @@
 //! v1→v2 isolation invariant in `docs/ARCHITECTURE.md`. This keeps the whole boundary
 //! serializable and makes the eventual external-process step a transport wrapper, not a rewrite.
 
+use crate::freedesktop::Launch;
 use crate::view::{ActionId, View};
 use crate::wm::WmCommand;
 use serde::{Deserialize, Serialize};
@@ -39,6 +40,10 @@ pub struct Reaction {
     pub commands: Vec<WmCommand>,
     /// Processes to spawn (argv), e.g. a launcher button. Host owns process spawning.
     pub spawn: Vec<Vec<String>>,
+    /// Desktop-app launch intents for the host executor to perform (DBus activation or Exec).
+    /// Same discipline as `commands`: the plugin emits pure-data intents, the executor performs
+    /// them — `zbus`/`Command` never appear in the plugin layer.
+    pub launch: Vec<Launch>,
 }
 
 impl Reaction {
@@ -64,6 +69,13 @@ impl Reaction {
     pub fn spawn(argv: Vec<String>) -> Self {
         Self {
             spawn: vec![argv],
+            ..Self::default()
+        }
+    }
+    /// Perform one desktop-app launch intent.
+    pub fn launch(intent: Launch) -> Self {
+        Self {
+            launch: vec![intent],
             ..Self::default()
         }
     }

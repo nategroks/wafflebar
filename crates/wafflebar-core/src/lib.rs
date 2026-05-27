@@ -26,7 +26,8 @@ pub use config::{
     Align, BarConfig, Cell, Config, ConfigError, GridConfig, ModuleConfig, Position,
     SCHEMA_VERSION,
 };
+pub use freedesktop::{DesktopAction, DesktopApp, Launch};
 pub use grid::{GridEngine, GridError, Placement};
 pub use plugin::{Event, Plugin, Reaction, Topic};
-pub use view::{ActionId, View};
+pub use view::{ActionId, MenuItem, View};
 pub use wm::{Output, Tag, TagState, Window, WindowId, WindowManager, WmCommand, WmEvent};
