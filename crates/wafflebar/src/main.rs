@@ -6,6 +6,8 @@
 
 mod app;
 mod modules;
+mod render;
+mod shell;
 mod wm;
 
 use std::path::PathBuf;

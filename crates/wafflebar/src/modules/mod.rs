@@ -1,30 +1,56 @@
-//! Module widgets and the dispatcher that maps a config `type` to a `gtk::Widget`.
+//! Module registry: maps a config `type` to a boxed [`Module`].
 //!
-//! M1 ships the `clock` module. Module kinds that aren't implemented yet render a dim
-//! placeholder labelled with their type, so a forward-looking config still produces a
-//! usable bar and the grid layout is visible. Real implementations land in M2/M3.
+//! Modules are GTK-free reducers (see `docs/ARCHITECTURE.md`); the host renders their `View`.
+//! Unknown types fall back to a [`Placeholder`] module that renders a dim label — *not* a
+//! special code path, just another `Module`.
 
 pub mod clock;
-pub mod dwl; // Module-trait implementations (tags, …); wired into the host renderer next.
+pub mod dwl;
 
-use gtk4::prelude::*;
-use gtk4::Widget;
-use tracing::warn;
-use wafflebar_core::ModuleConfig;
+use wafflebar_core::{ActionId, Event, Module, ModuleConfig, Reaction, Topic, View};
 
-/// Build the widget for a module of the given `kind`.
-pub fn build(kind: &str, cfg: &ModuleConfig) -> Widget {
+/// Construct a module for `kind`, bound to `output` (the bar's monitor) and `cfg`.
+pub fn build(kind: &str, output: &str, cfg: &ModuleConfig) -> Box<dyn Module> {
     match kind {
-        "clock" => clock::build(cfg),
-        other => placeholder(other),
+        "clock" => Box::new(clock::Clock::new(cfg)),
+        "tags" => Box::new(dwl::tags::Tags::new(output)),
+        "window" => Box::new(dwl::window::Window::new(
+            output,
+            cfg.opt_i64("max_chars").unwrap_or(0).max(0) as usize,
+        )),
+        other => Box::new(Placeholder::new(other)),
     }
 }
 
-/// A dim placeholder for not-yet-implemented module kinds.
-fn placeholder(kind: &str) -> Widget {
-    warn!(kind, "module not implemented yet; rendering placeholder");
-    let label = gtk4::Label::new(Some(kind));
-    label.add_css_class("module");
-    label.add_css_class("placeholder");
-    label.upcast()
+/// A dim label for not-yet-implemented module kinds.
+pub struct Placeholder {
+    kind: String,
+}
+
+impl Placeholder {
+    pub fn new(kind: &str) -> Self {
+        Self {
+            kind: kind.to_string(),
+        }
+    }
+}
+
+impl Module for Placeholder {
+    fn id(&self) -> &str {
+        &self.kind
+    }
+    fn subscribe(&self) -> Vec<Topic> {
+        Vec::new()
+    }
+    fn view(&self) -> View {
+        View::label(self.kind.clone())
+            .with_class("module")
+            .with_class("placeholder")
+    }
+    fn on_event(&mut self, _ev: &Event) -> Reaction {
+        Reaction::none()
+    }
+    fn on_action(&mut self, _action: &ActionId) -> Reaction {
+        Reaction::none()
+    }
 }
