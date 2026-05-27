@@ -152,6 +152,21 @@ impl ModuleConfig {
     pub fn opt_i64(&self, key: &str) -> Option<i64> {
         self.options.get(key).and_then(toml::Value::as_integer)
     }
+
+    /// Fetch an array-of-strings option by key (e.g. the launcher's `items`).
+    /// Non-array values and non-string elements are dropped; missing key → empty.
+    pub fn opt_str_list(&self, key: &str) -> Vec<String> {
+        self.options
+            .get(key)
+            .and_then(toml::Value::as_array)
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(toml::Value::as_str)
+                    .map(str::to_string)
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
 }
 
 /// A grid cell occupied by a module, with optional spans.

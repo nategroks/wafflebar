@@ -48,11 +48,14 @@ pub struct DesktopApp {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Launch {
     /// DBus activation: `org.freedesktop.Application` on `bus_name` at `object_path`.
+    /// `fallback_exec` is the expanded `Exec=` argv the executor spawns if DBus activation fails
+    /// at runtime (the xfce4-panel/GIO behavior); empty if there's no usable `Exec=`.
     DBus {
         bus_name: String,
         object_path: String,
         action: Option<String>,
         files: Vec<String>,
+        fallback_exec: Vec<String>,
     },
     /// Spawn argv directly (`Exec=` field codes already expanded).
     Exec { argv: Vec<String> },
@@ -122,31 +125,45 @@ impl DesktopApp {
 
     /// Build a launch intent for the app (or one of its `Actions=`), passing `files`.
     ///
-    /// Prefers DBus activation when declared *and* the app id is a valid bus name; otherwise
-    /// spawns the expanded `Exec=`. (The host executor falls back to Exec if DBus activation
-    /// fails at runtime — a deliberate deviation we inherit from xfce4-panel/GIO.)
+    /// **Actions always go via `Exec=`.** The spec's DBus `ActivateAction` is stubbed in v1
+    /// (TODO: E-phase), so an action with no `Exec=` is unlaunchable and yields `ExecError::Empty`.
+    ///
+    /// The **primary** launch prefers DBus activation when declared *and* the app id is a valid
+    /// bus name, carrying the expanded `Exec=` as `fallback_exec` so the host executor can spawn
+    /// it if DBus activation fails at runtime — a deliberate deviation we inherit from
+    /// xfce4-panel/GIO. Otherwise it spawns `Exec=` directly.
     pub fn launch(&self, action: Option<&str>, files: &[String]) -> Result<Launch, exec::ExecError> {
+        // Action launch: Exec= only (ActivateAction unimplemented in v1).
+        if let Some(a) = action {
+            let raw = self
+                .actions
+                .iter()
+                .find(|x| x.id == a)
+                .and_then(|x| x.exec.as_deref())
+                .ok_or(exec::ExecError::Empty)?;
+            return Ok(Launch::Exec {
+                argv: exec::expand(raw, self.icon.as_deref(), Some(&self.name), &self.path, files)?,
+            });
+        }
+        // Primary launch: expand Exec= once, reuse it as the DBus fallback or the direct argv.
+        let exec_argv = self
+            .exec
+            .as_deref()
+            .map(|raw| exec::expand(raw, self.icon.as_deref(), Some(&self.name), &self.path, files))
+            .transpose()?;
         if self.dbus_activatable {
             if let Some(bus_name) = bus_name_from_id(&self.file_id) {
                 return Ok(Launch::DBus {
                     object_path: object_path_from_bus(&bus_name),
                     bus_name,
-                    action: action.map(str::to_string),
+                    action: None,
                     files: files.to_vec(),
+                    fallback_exec: exec_argv.unwrap_or_default(),
                 });
             }
         }
-        let raw = match action {
-            Some(a) => self
-                .actions
-                .iter()
-                .find(|x| x.id == a)
-                .and_then(|x| x.exec.as_deref()),
-            None => self.exec.as_deref(),
-        }
-        .ok_or(exec::ExecError::Empty)?;
         Ok(Launch::Exec {
-            argv: exec::expand(raw, self.icon.as_deref(), Some(&self.name), &self.path, files)?,
+            argv: exec_argv.ok_or(exec::ExecError::Empty)?,
         })
     }
 }
@@ -316,8 +333,32 @@ mod tests {
                 object_path: "/org/gnome/Calculator".into(),
                 action: None,
                 files: vec![],
+                fallback_exec: vec!["gnome-calculator".into()],
             }
         );
+    }
+
+    #[test]
+    fn action_launch_uses_exec_not_dbus() {
+        // Even a DBusActivatable app routes its Actions= through Exec= in v1 (ActivateAction stub).
+        let e = DesktopEntry::from_str(
+            PathBuf::from("/usr/share/applications/org.gnome.Calculator.desktop"),
+            "[Desktop Entry]\nType=Application\nName=Calculator\nExec=gnome-calculator\nDBusActivatable=true\nActions=New;\n\n[Desktop Action New]\nName=New Window\nExec=gnome-calculator --new\n",
+            Some(&[] as &[&str]),
+        )
+        .unwrap();
+        let app = DesktopApp::from_entry(&e, &[] as &[&str]).unwrap();
+        assert_eq!(
+            app.launch(Some("New"), &[]).unwrap(),
+            Launch::Exec { argv: vec!["gnome-calculator".into(), "--new".into()] }
+        );
+    }
+
+    #[test]
+    fn stale_action_id_yields_empty_err() {
+        // An action ID not present in the desktop file is an error the plugin logs + no-ops on.
+        let app = app("[Desktop Entry]\nType=Application\nName=X\nExec=x\n").unwrap();
+        assert!(matches!(app.launch(Some("ghost"), &[]), Err(exec::ExecError::Empty)));
     }
 
     #[test]
