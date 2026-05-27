@@ -323,6 +323,33 @@ impl SniBackend {
         });
     }
 
+    /// `SecondaryActivate(0, 0)` (middle-click). Fire-and-forget.
+    pub fn secondary_activate(&self, key: &str) {
+        let proxy = match self.state.borrow().entries.get(key) {
+            Some(e) => e.proxy.clone(),
+            None => return,
+        };
+        glib::spawn_future_local(async move {
+            if let Err(e) = proxy.call_method("SecondaryActivate", &(0_i32, 0_i32)).await {
+                warn!(error = %e, "tray: SecondaryActivate failed");
+            }
+        });
+    }
+
+    /// `Scroll(delta, orientation)`. Fire-and-forget; errors swallowed (item may have gone zombie).
+    pub fn scroll(&self, key: &str, delta: i32, horizontal: bool) {
+        let proxy = match self.state.borrow().entries.get(key) {
+            Some(e) => e.proxy.clone(),
+            None => return,
+        };
+        let orientation = if horizontal { "horizontal" } else { "vertical" };
+        glib::spawn_future_local(async move {
+            if let Err(e) = proxy.call_method("Scroll", &(delta, orientation)).await {
+                warn!(error = %e, "tray: Scroll failed");
+            }
+        });
+    }
+
     /// `com.canonical.dbusmenu.Event(id, "clicked", …)` on the item's menu. Fire-and-forget; if the
     /// item's bus just vanished the call errors and is swallowed (zombie-prune removes it shortly).
     pub fn menu_click(&self, key: &str, id: i32) {
@@ -446,6 +473,7 @@ async fn add_item(
                 title: String::new(),
                 icon_name: None,
                 icon_pixmap: None,
+                icon_theme_path: None,
                 status: TrayStatus::Passive,
                 menu: Vec::new(),
             },
@@ -562,12 +590,23 @@ async fn refresh(
         let Some(entry) = s.entries.get_mut(key) else {
             return None; // removed while we were fetching
         };
+        // On NeedsAttention, prefer the attention icon (falling back to the normal one).
+        let attn = status == TrayStatus::NeedsAttention;
+        let icon_name = attn
+            .then(|| get_str("AttentionIconName"))
+            .flatten()
+            .or_else(|| get_str("IconName"));
+        let icon_pixmap = attn
+            .then(|| props.get("AttentionIconPixmap").and_then(build_pixmap))
+            .flatten()
+            .or_else(|| props.get("IconPixmap").and_then(build_pixmap));
         let item = TrayItem {
             key: key.to_string(),
             id: get_str("Id").unwrap_or_default(),
             title: get_str("Title").unwrap_or_default(),
-            icon_name: get_str("IconName"),
-            icon_pixmap: props.get("IconPixmap").and_then(build_pixmap),
+            icon_name,
+            icon_pixmap,
+            icon_theme_path: get_str("IconThemePath"),
             status,
             menu: entry.item.menu.clone(), // preserve the DBusMenu-fetched menu
         };

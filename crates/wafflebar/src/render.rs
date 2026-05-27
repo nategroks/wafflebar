@@ -257,13 +257,8 @@ pub fn render_view(view: &View, slot: usize, host: &Rc<Host>) -> gtk4::Widget {
             add_classes(&l, classes);
             l.upcast()
         }
-        View::Icon { name, size, classes, pixmap } => {
-            // Prefer the themed name; fall back to the raw pixmap when the name is empty or not in
-            // the theme; otherwise let GTK show its missing-icon placeholder for `name`.
-            let img = match pixmap {
-                Some(px) if name.is_empty() || !icon_in_theme(name) => image_from_pixmap(px),
-                _ => gtk4::Image::from_icon_name(name),
-            };
+        View::Icon { name, size, classes, pixmap, theme_path } => {
+            let img = build_icon(name, *size, theme_path.as_deref(), pixmap.as_ref());
             img.set_pixel_size(*size as i32);
             add_classes(&img, classes);
             img.upcast()
@@ -274,7 +269,7 @@ pub fn render_view(view: &View, slot: usize, host: &Rc<Host>) -> gtk4::Widget {
         View::Col { children, gap, classes } => {
             container(Orientation::Vertical, *gap, children, classes, slot, host)
         }
-        View::Button { child, action, classes, menu, key: _, scroll_up, scroll_down } => {
+        View::Button { child, action, classes, menu, key: _, scroll_up, scroll_down, action_middle } => {
             let b = gtk4::Box::new(Orientation::Horizontal, 0);
             b.append(&render_view(child, slot, host));
             add_classes(&b, classes);
@@ -288,6 +283,15 @@ pub fn render_view(view: &View, slot: usize, host: &Rc<Host>) -> gtk4::Widget {
                 left.connect_released(move |_, _, _, _| host.dispatch_action(slot, &action));
             }
             b.add_controller(left);
+            // Middle-click → secondary action (tray SecondaryActivate).
+            if let Some(mid) = action_middle {
+                let m = GestureClick::new();
+                m.set_button(gdk::BUTTON_MIDDLE);
+                let host = host.clone();
+                let mid = mid.clone();
+                m.connect_released(move |_, _, _, _| host.dispatch_action(slot, &mid));
+                b.add_controller(m);
+            }
             // Right-click → context menu popover (when the plugin supplied one).
             if !menu.is_empty() {
                 let popover = build_menu(menu, slot, host);
@@ -435,12 +439,60 @@ fn build_menu(menu: &[MenuItem], slot: usize, host: &Rc<Host>) -> Popover {
     popover
 }
 
-/// Whether `name` resolves in the current display's icon theme. Only consulted when an `Icon` has a
-/// pixmap fallback (so we know whether to use the name or the pixmap).
+/// Resolve an icon: themed `name` first (scoped to `theme_path` if the item ships one), then the
+/// raw `pixmap`, then GTK's placeholder for `name`.
+fn build_icon(
+    name: &str,
+    size: u32,
+    theme_path: Option<&str>,
+    pixmap: Option<&wafflebar_core::Pixmap>,
+) -> gtk4::Image {
+    if !name.is_empty() {
+        if let Some(path) = theme_path {
+            if let Some(img) = scoped_icon(name, size, path) {
+                return img;
+            }
+        } else if icon_in_theme(name) || pixmap.is_none() {
+            // Default theme resolves it, or there's no pixmap to prefer → let GTK render the name
+            // (placeholder if missing). Keeps plain icons (tags, clock, …) on the simple path.
+            return gtk4::Image::from_icon_name(name);
+        }
+    }
+    if let Some(px) = pixmap {
+        return image_from_pixmap(px);
+    }
+    gtk4::Image::from_icon_name(name)
+}
+
+/// Whether `name` resolves in the current display's icon theme.
 fn icon_in_theme(name: &str) -> bool {
     gdk::Display::default()
         .map(|d| gtk4::IconTheme::for_display(&d).has_icon(name))
         .unwrap_or(false)
+}
+
+/// Resolve `name` against a theme that includes the item's `IconThemePath`, **scoped to this call**:
+/// a fresh `IconTheme` seeded from the display (so standard icons still resolve) with `path` added,
+/// never the shared display theme — IconThemePath is per-item, and mutating the global theme would
+/// let one item's path pollute another's resolution.
+fn scoped_icon(name: &str, size: u32, path: &str) -> Option<gtk4::Image> {
+    let theme = gtk4::IconTheme::new();
+    if let Some(d) = gdk::Display::default() {
+        theme.set_display(Some(&d)); // inherit the display's standard search dirs + theme name
+    }
+    theme.add_search_path(path);
+    if !theme.has_icon(name) {
+        return None;
+    }
+    let paintable = theme.lookup_icon(
+        name,
+        &[],
+        size as i32,
+        1,
+        gtk4::TextDirection::None,
+        gtk4::IconLookupFlags::empty(),
+    );
+    Some(gtk4::Image::from_paintable(Some(&paintable)))
 }
 
 /// Build a `gtk::Image` from a [`Pixmap`] (RGBA bytes → `GdkMemoryTexture`, a paintable). The Image

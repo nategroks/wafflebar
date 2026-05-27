@@ -8,9 +8,14 @@
 
 pub mod backend;
 
-use wafflebar_core::{ActionId, Event, Plugin, Reaction, Topic, TrayCommand, TrayItem, View};
+use wafflebar_core::{
+    ActionId, Event, Plugin, Reaction, Topic, TrayCommand, TrayItem, TrayStatus, View,
+};
 
 const ACTION_ACTIVATE: &str = "activate:";
+const ACTION_SECONDARY: &str = "secondary:";
+const ACTION_SCROLL_UP: &str = "scroll-up:";
+const ACTION_SCROLL_DOWN: &str = "scroll-down:";
 const ACTION_MENU: &str = "menu:"; // "menu:<key>:<dbusmenu-id>"
 
 pub struct StatusTray {
@@ -47,17 +52,28 @@ impl Plugin for StatusTray {
             .items
             .iter()
             .map(|item| {
-                // Icon by themed name; placeholder when absent (pixmap icons are D2c).
-                // Themed name preferred; pixmap fallback (the renderer chooses); placeholder if
-                // neither. Left-click → Activate; right-click → the DBusMenu (B2b Button.menu).
+                let key = &item.key;
+                // Themed name preferred; pixmap/theme-path fallbacks (renderer chooses); placeholder
+                // if neither. Left = Activate, middle = SecondaryActivate, scroll = Scroll, right =
+                // the DBusMenu (B2b Button.menu).
                 let icon = item.icon_name.as_deref().unwrap_or("application-x-executable");
-                View::icon(icon, 16)
+                let mut btn = View::icon(icon, 16)
                     .with_pixmap(item.icon_pixmap.clone())
+                    .with_theme_path(item.icon_theme_path.clone())
                     .with_class("tray-icon")
-                    .button(ActionId::new(format!("{ACTION_ACTIVATE}{}", item.key)))
+                    .button(ActionId::new(format!("{ACTION_ACTIVATE}{key}")))
                     .with_menu(item.menu.clone())
-                    .with_key(format!("tray:{}", item.key)) // stable identity for the keyed diff
-                    .with_class("tray-item")
+                    .with_middle_click(ActionId::new(format!("{ACTION_SECONDARY}{key}")))
+                    .with_scroll(
+                        ActionId::new(format!("{ACTION_SCROLL_UP}{key}")),
+                        ActionId::new(format!("{ACTION_SCROLL_DOWN}{key}")),
+                    )
+                    .with_key(format!("tray:{key}")) // stable identity for the keyed diff
+                    .with_class("tray-item");
+                if item.status == TrayStatus::NeedsAttention {
+                    btn = btn.with_class("needs-attention");
+                }
+                btn
             })
             .collect();
         View::row(buttons, 2).with_class("module").with_class("statustray")
@@ -67,21 +83,33 @@ impl Plugin for StatusTray {
         let Event::Tray(items) = ev else {
             return Reaction::none();
         };
-        // Backend re-publishes the full list on any item change; only show/hide visible items, and
-        // only dirty when the visible set actually changed.
-        let visible: Vec<TrayItem> = items.iter().filter(|i| i.status.visible()).cloned().collect();
-        if visible == self.items {
+        // The backend re-publishes the full list on any change; dirty only when it actually moved.
+        // TODO(F): hide Passive items behind a "show hidden" preference (needs Plugin::configure,
+        // F3). Until then Passive renders like Active — without the toggle, hiding would make those
+        // items unreachable, which is worse than showing them.
+        if *items == self.items {
             return Reaction::none();
         }
-        self.items = visible;
+        self.items = items.clone();
         Reaction::dirty()
     }
 
     fn on_action(&mut self, action: &ActionId) -> Reaction {
-        if let Some(key) = action.0.strip_prefix(ACTION_ACTIVATE) {
+        let a = &action.0;
+        if let Some(key) = a.strip_prefix(ACTION_ACTIVATE) {
             return Reaction::tray(TrayCommand::Activate { key: key.to_string() });
         }
-        if let Some(rest) = action.0.strip_prefix(ACTION_MENU) {
+        if let Some(key) = a.strip_prefix(ACTION_SECONDARY) {
+            return Reaction::tray(TrayCommand::SecondaryActivate { key: key.to_string() });
+        }
+        // Scroll: SNI convention is up = -1, down = +1 (vertical); one step per accumulated tick.
+        if let Some(key) = a.strip_prefix(ACTION_SCROLL_UP) {
+            return Reaction::tray(TrayCommand::Scroll { key: key.to_string(), delta: -1, horizontal: false });
+        }
+        if let Some(key) = a.strip_prefix(ACTION_SCROLL_DOWN) {
+            return Reaction::tray(TrayCommand::Scroll { key: key.to_string(), delta: 1, horizontal: false });
+        }
+        if let Some(rest) = a.strip_prefix(ACTION_MENU) {
             // "<key>:<id>" — the key may contain ':'/'/', so the id is after the *last* ':'.
             if let Some((key, id)) = rest.rsplit_once(':') {
                 if let Ok(id) = id.parse::<i32>() {
@@ -96,7 +124,6 @@ impl Plugin for StatusTray {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use wafflebar_core::TrayStatus;
 
     fn item(key: &str, icon: Option<&str>, status: TrayStatus) -> TrayItem {
         TrayItem {
@@ -105,6 +132,7 @@ mod tests {
             title: key.into(),
             icon_name: icon.map(str::to_string),
             icon_pixmap: None,
+            icon_theme_path: None,
             status,
             menu: Vec::new(),
         }
@@ -133,33 +161,57 @@ mod tests {
     }
 
     #[test]
-    fn passive_items_are_hidden() {
+    fn passive_items_render_like_active_in_v1() {
+        // v1 reversal: Passive is shown (no show-hidden toggle yet — TODO(F)).
         let mut t = StatusTray::new();
         t.on_event(&Event::Tray(vec![
             item("a", Some("x"), TrayStatus::Active),
-            item("hidden", Some("y"), TrayStatus::Passive),
+            item("p", Some("y"), TrayStatus::Passive),
         ]));
-        assert_eq!(tray_keys(&t.view()), vec!["tray:a"]);
+        assert_eq!(tray_keys(&t.view()), vec!["tray:a", "tray:p"]);
     }
 
     #[test]
     fn empty_tray_renders_nothing() {
         let mut t = StatusTray::new();
         assert_eq!(t.view(), View::Empty);
-        // A list of only-Passive items is also nothing visible.
+        // Only-Passive is no longer "nothing" in v1 — it renders.
         t.on_event(&Event::Tray(vec![item("p", Some("x"), TrayStatus::Passive)]));
-        assert_eq!(t.view(), View::Empty);
+        assert_eq!(tray_keys(&t.view()), vec!["tray:p"]);
     }
 
     #[test]
-    fn republish_with_no_visible_change_does_not_dirty() {
+    fn identical_republish_does_not_dirty() {
         let mut t = StatusTray::new();
         let items = vec![item("a", Some("x"), TrayStatus::Active)];
         assert!(t.on_event(&Event::Tray(items.clone())).dirty);
-        // Same visible set (a Passive item toggling elsewhere wouldn't change what's shown).
-        let mut items2 = items.clone();
-        items2.push(item("p", None, TrayStatus::Passive));
-        assert!(!t.on_event(&Event::Tray(items2)).dirty, "adding a hidden item is no-op");
+        assert!(!t.on_event(&Event::Tray(items)).dirty, "same list → no re-render");
+    }
+
+    #[test]
+    fn needs_attention_adds_a_class() {
+        let mut t = StatusTray::new();
+        t.on_event(&Event::Tray(vec![item("a", Some("x"), TrayStatus::NeedsAttention)]));
+        let View::Row { children, .. } = t.view() else { panic!("row") };
+        let View::Button { classes, .. } = &children[0] else { panic!("button") };
+        assert!(classes.iter().any(|c| c == "needs-attention"));
+    }
+
+    #[test]
+    fn middle_and_scroll_actions_route_to_commands() {
+        let mut t = StatusTray::new();
+        assert_eq!(
+            t.on_action(&ActionId::new("secondary:k")).tray,
+            vec![TrayCommand::SecondaryActivate { key: "k".into() }]
+        );
+        assert_eq!(
+            t.on_action(&ActionId::new("scroll-up:k")).tray,
+            vec![TrayCommand::Scroll { key: "k".into(), delta: -1, horizontal: false }]
+        );
+        assert_eq!(
+            t.on_action(&ActionId::new("scroll-down:k")).tray,
+            vec![TrayCommand::Scroll { key: "k".into(), delta: 1, horizontal: false }]
+        );
     }
 
     #[test]
