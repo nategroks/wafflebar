@@ -19,6 +19,7 @@ pub mod config;
 pub mod fake;
 pub mod freedesktop;
 pub mod grid;
+pub mod memory;
 pub mod net;
 pub mod plugin;
 pub mod reconcile;
@@ -32,6 +33,7 @@ pub use config::{
 pub use audio::{VolumeCommand, VolumeEvent, VOLUME_NORM};
 pub use freedesktop::{DesktopAction, DesktopApp, Launch};
 pub use grid::{GridEngine, GridError, Placement};
+pub use memory::MemoryState;
 pub use net::NetworkState;
 pub use plugin::{Event, Plugin, Reaction, Topic};
 pub use reconcile::{diff_children, ChildPatch, ListPatch};

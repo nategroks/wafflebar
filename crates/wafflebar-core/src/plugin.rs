@@ -8,6 +8,7 @@
 
 use crate::audio::{VolumeCommand, VolumeEvent};
 use crate::freedesktop::Launch;
+use crate::memory::MemoryState;
 use crate::net::NetworkState;
 use crate::view::{ActionId, View};
 use crate::wm::WmCommand;
@@ -27,6 +28,9 @@ pub enum Topic {
     /// Network (primary-connection) changes. The host starts the network backend only if some
     /// plugin subscribes to this.
     Network,
+    /// Memory (RAM/swap) snapshots. The host starts the memory polling backend only if some plugin
+    /// subscribes to this.
+    Memory,
 }
 
 /// An event delivered to a subscribed module.
@@ -40,6 +44,8 @@ pub enum Event {
     Volume(VolumeEvent),
     /// A network state change from the host's network backend.
     Network(NetworkState),
+    /// A memory snapshot from the host's polling backend.
+    Memory(MemoryState),
 }
 
 /// A module's response to an event or action: whether its view changed, plus any side effects
