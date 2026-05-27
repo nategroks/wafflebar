@@ -274,6 +274,7 @@ fn build_grid_and_host(
             let b = b.clone();
             Box::new(move |cmd| match cmd {
                 TrayCommand::Activate { key } => b.activate(key),
+                TrayCommand::MenuClick { key, id } => b.menu_click(key, *id),
             })
         }
         None => Box::new(|_| {}),

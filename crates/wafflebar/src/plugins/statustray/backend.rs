@@ -31,6 +31,7 @@ use std::sync::{Arc, Mutex};
 
 use gtk4::glib;
 use tracing::{debug, warn};
+use wafflebar_core::view::{ActionId, MenuItem};
 use wafflebar_core::{TrayItem, TrayStatus};
 use zbus::export::ordered_stream::OrderedStreamExt;
 use zbus::fdo::DBusProxy;
@@ -138,12 +139,99 @@ trait Watcher {
     fn status_notifier_item_unregistered(&self, service: String) -> zbus::Result<()>;
 }
 
+// ---- DBusMenu client ------------------------------------------------------------------------
+
+/// A DBusMenu layout node: `(id, properties, children-as-variants)` — D-Bus type `(ia{sv}av)`.
+/// `children` is an array of *variants*, each wrapping another node, so it's parsed by hand.
+type Layout = (i32, HashMap<String, OwnedValue>, Vec<OwnedValue>);
+
+#[zbus::proxy(interface = "com.canonical.dbusmenu")]
+trait DbusMenu {
+    /// `(revision, layout)`. `parent_id` 0 = root; `depth` 1 = just its immediate children.
+    fn get_layout(
+        &self,
+        parent_id: i32,
+        recursion_depth: i32,
+        property_names: &[&str],
+    ) -> zbus::Result<(u32, Layout)>;
+
+    fn event(
+        &self,
+        id: i32,
+        event_id: &str,
+        data: &zbus::zvariant::Value<'_>,
+        timestamp: u32,
+    ) -> zbus::Result<()>;
+
+    #[zbus(signal)]
+    fn layout_updated(&self, revision: u32, parent: i32) -> zbus::Result<()>;
+}
+
+const MENU_PROPS: &[&str] = &["type", "label", "enabled", "visible", "children-display", "toggle-type"];
+
+/// Translate a DBusMenu top-level layout into flat [`MenuItem`]s. Submenus and toggles are
+/// flattened in v1 (rendered as plain items); `*saw_*` flag the first time we drop that detail so
+/// the caller can warn once — the field signal that "a real app needs nested menus" has arrived.
+/// Unwrap one `av` element (a variant wrapping a `(ia{sv}av)` node) into its id + properties.
+fn child_node(child: &OwnedValue) -> Option<(i32, HashMap<String, OwnedValue>)> {
+    use zbus::zvariant::Value;
+    let st = match &**child {
+        Value::Value(inner) => match &**inner {
+            Value::Structure(s) => s,
+            _ => return None,
+        },
+        Value::Structure(s) => s,
+        _ => return None,
+    };
+    let fields = st.fields();
+    let id = i32::try_from(fields.first()?.try_clone().ok()?).ok()?;
+    let props = HashMap::<String, OwnedValue>::try_from(fields.get(1)?.try_clone().ok()?).ok()?;
+    Some((id, props))
+}
+
+fn parse_menu(layout: &Layout, key: &str, saw_submenu: &mut bool, saw_toggle: &mut bool) -> Vec<MenuItem> {
+    let mut out = Vec::new();
+    for child in &layout.2 {
+        let Some((id, props)) = child_node(child) else {
+            continue;
+        };
+        let get = |k: &str| props.get(k).and_then(|v| String::try_from(v.clone()).ok());
+        let visible = props.get("visible").and_then(|v| bool::try_from(v.clone()).ok()).unwrap_or(true);
+        if !visible {
+            continue;
+        }
+        if get("type").as_deref() == Some("separator") {
+            out.push(MenuItem::Separator);
+            continue;
+        }
+        if get("children-display").as_deref() == Some("submenu") {
+            *saw_submenu = true; // TODO(statustray): render submenus (MenuItem::Submenu) when needed
+        }
+        if props.contains_key("toggle-type") {
+            *saw_toggle = true; // TODO(statustray): show toggle state (MenuItem::Toggle) when needed
+        }
+        let label = get("label").unwrap_or_default().replace('_', ""); // strip mnemonics
+        out.push(MenuItem::Item {
+            label,
+            action: ActionId::new(format!("menu:{key}:{id}")),
+        });
+    }
+    out
+}
+
 // ---- Per-item main-thread state -------------------------------------------------------------
 
 struct ItemEntry {
     item: TrayItem,
     /// SNI proxy, kept for `Activate`.
     proxy: Proxy<'static>,
+    /// DBusMenu proxy (the item's `Menu` path), kept for `Event` clicks. `None` until set up / if
+    /// the item has no menu.
+    menu_proxy: Option<DbusMenuProxy<'static>>,
+    /// Last DBusMenu layout revision we fetched (re-fetch when a `LayoutUpdated` differs).
+    menu_revision: u32,
+    /// True once we've warned about flattening a submenu/toggle for this item (warn once).
+    menu_degraded_warned: bool,
     /// The item's polling/signal future; aborted on unregister.
     task: glib::JoinHandle<()>,
 }
@@ -186,6 +274,21 @@ impl SniBackend {
         glib::spawn_future_local(async move {
             if let Err(e) = proxy.call_method("Activate", &(0_i32, 0_i32)).await {
                 warn!(error = %e, "tray: Activate failed");
+            }
+        });
+    }
+
+    /// `com.canonical.dbusmenu.Event(id, "clicked", …)` on the item's menu. Fire-and-forget; if the
+    /// item's bus just vanished the call errors and is swallowed (zombie-prune removes it shortly).
+    pub fn menu_click(&self, key: &str, id: i32) {
+        let menu = match self.state.borrow().entries.get(key).and_then(|e| e.menu_proxy.clone()) {
+            Some(p) => p,
+            None => return,
+        };
+        glib::spawn_future_local(async move {
+            let data = zbus::zvariant::Value::from(0_i32); // "clicked" carries no data
+            if let Err(e) = menu.event(id, "clicked", &data, 0).await {
+                warn!(error = %e, "tray: menu Event(clicked) failed");
             }
         });
     }
@@ -298,8 +401,12 @@ async fn add_item(
                 title: String::new(),
                 icon_name: None,
                 status: TrayStatus::Passive,
+                menu: Vec::new(),
             },
             proxy,
+            menu_proxy: None,
+            menu_revision: 0,
+            menu_degraded_warned: false,
             task,
         },
     );
@@ -321,14 +428,45 @@ fn remove_item(state: &Rc<RefCell<State>>, emit: &Rc<dyn Fn(Vec<TrayItem>)>, ser
     }
 }
 
-/// One item's lifetime: initial property fetch, then re-fetch on any SNI change signal.
+/// One item's lifetime: SNI property fetch + (if it has a `Menu`) DBusMenu layout, then re-fetch on
+/// the respective change signals — two independent streams, two simple loops.
 async fn run_item(
     proxy: Proxy<'static>,
     key: String,
     state: Rc<RefCell<State>>,
     emit: Rc<dyn Fn(Vec<TrayItem>)>,
 ) {
-    refresh(&proxy, &key, &state, &emit).await;
+    let menu_path = refresh(&proxy, &key, &state, &emit).await;
+
+    // Set up the DBusMenu side if the item advertises a Menu, on the item's bus.
+    if let Some(path) = menu_path {
+        let built = DbusMenuProxy::builder(proxy.connection())
+            .destination(proxy.destination().to_owned())
+            .and_then(|b| b.path(path))
+            .map(|b| b.build());
+        if let Ok(fut) = built {
+            if let Ok(menu) = fut.await {
+                if let Some(e) = state.borrow_mut().entries.get_mut(&key) {
+                    e.menu_proxy = Some(menu.clone());
+                }
+                refresh_menu(&menu, &key, &state, &emit).await;
+                // Re-fetch layout when it changes (compare revisions: != not >, they can wrap).
+                let (m, k, st, em) = (menu.clone(), key.clone(), state.clone(), emit.clone());
+                glib::spawn_future_local(async move {
+                    if let Ok(mut updates) = m.receive_layout_updated().await {
+                        while let Some(sig) = updates.next().await {
+                            let rev = sig.args().map(|a| a.revision).unwrap_or(0);
+                            let cached = st.borrow().entries.get(&k).map(|e| e.menu_revision).unwrap_or(0);
+                            if rev != cached {
+                                refresh_menu(&m, &k, &st, &em).await;
+                            }
+                        }
+                    }
+                });
+            }
+        }
+    }
+
     let mut signals = match proxy.receive_all_signals().await {
         Ok(s) => s,
         Err(e) => {
@@ -341,18 +479,19 @@ async fn run_item(
     }
 }
 
-/// `Properties.GetAll(org.kde.StatusNotifierItem)` → update this item's derived state, then publish.
+/// `Properties.GetAll(org.kde.StatusNotifierItem)` → update the SNI-derived fields (preserving the
+/// separately-fetched menu), publish on change. Returns the item's `Menu` object path if any.
 async fn refresh(
     proxy: &Proxy<'static>,
     key: &str,
     state: &Rc<RefCell<State>>,
     emit: &Rc<dyn Fn(Vec<TrayItem>)>,
-) {
+) -> Option<String> {
     let props: HashMap<String, OwnedValue> = match get_all(proxy).await {
         Ok(p) => p,
         Err(e) => {
             warn!(key, error = %e, "tray: GetAll failed (transient)"); // keep last state
-            return;
+            return None;
         }
     };
 
@@ -364,31 +503,87 @@ async fn refresh(
         Some("NeedsAttention") => TrayStatus::NeedsAttention,
         _ => TrayStatus::Passive,
     };
-    let item = TrayItem {
-        key: key.to_string(),
-        id: get_str("Id").unwrap_or_default(),
-        title: get_str("Title").unwrap_or_default(),
-        icon_name: get_str("IconName"),
-        status,
-    };
+    // Menu is an object path ('o'); "/" is the no-menu sentinel.
+    let menu_path = props
+        .get("Menu")
+        .and_then(|v| zbus::zvariant::OwnedObjectPath::try_from(v.clone()).ok())
+        .map(|p| p.to_string())
+        .filter(|p| p != "/" && !p.is_empty());
 
+    let mut changed = false;
     {
         let mut s = state.borrow_mut();
         let Some(entry) = s.entries.get_mut(key) else {
-            return; // removed while we were fetching
+            return None; // removed while we were fetching
         };
-        if entry.item == item {
-            return; // no change — don't republish
-        }
-        entry.item = item.clone();
-        // Upsert into the ordered publish list.
-        if let Some(existing) = s.items.iter_mut().find(|i| i.key == key) {
-            *existing = item;
-        } else {
-            s.items.push(item);
+        let item = TrayItem {
+            key: key.to_string(),
+            id: get_str("Id").unwrap_or_default(),
+            title: get_str("Title").unwrap_or_default(),
+            icon_name: get_str("IconName"),
+            status,
+            menu: entry.item.menu.clone(), // preserve the DBusMenu-fetched menu
+        };
+        if entry.item != item {
+            entry.item = item.clone();
+            upsert(&mut s.items, item);
+            changed = true;
         }
     }
-    publish(state, emit);
+    if changed {
+        publish(state, emit);
+    }
+    menu_path
+}
+
+/// `GetLayout(0, 1, …)` → translate the top-level layout into the item's menu; publish on change.
+async fn refresh_menu(
+    menu: &DbusMenuProxy<'static>,
+    key: &str,
+    state: &Rc<RefCell<State>>,
+    emit: &Rc<dyn Fn(Vec<TrayItem>)>,
+) {
+    let (revision, layout) = match menu.get_layout(0, 1, MENU_PROPS).await {
+        Ok(r) => r,
+        Err(e) => {
+            warn!(key, error = %e, "tray: GetLayout failed (item exposes Menu but no usable service)");
+            return;
+        }
+    };
+
+    let mut changed = false;
+    {
+        let mut s = state.borrow_mut();
+        let Some(entry) = s.entries.get_mut(key) else {
+            return;
+        };
+        let mut saw_submenu = false;
+        let mut saw_toggle = false;
+        let items = parse_menu(&layout, key, &mut saw_submenu, &mut saw_toggle);
+        if (saw_submenu || saw_toggle) && !entry.menu_degraded_warned {
+            entry.menu_degraded_warned = true;
+            warn!(key, saw_submenu, saw_toggle, "tray: flattening DBusMenu (submenu/toggle not rendered in v1)");
+        }
+        entry.menu_revision = revision;
+        if entry.item.menu != items {
+            entry.item.menu = items;
+            let updated = entry.item.clone();
+            upsert(&mut s.items, updated);
+            changed = true;
+        }
+    }
+    if changed {
+        publish(state, emit);
+    }
+}
+
+/// Upsert by key into the ordered publish list.
+fn upsert(items: &mut Vec<TrayItem>, item: TrayItem) {
+    if let Some(existing) = items.iter_mut().find(|i| i.key == item.key) {
+        *existing = item;
+    } else {
+        items.push(item);
+    }
 }
 
 /// `org.freedesktop.DBus.Properties.GetAll(org.kde.StatusNotifierItem)` via the fdo helper.
