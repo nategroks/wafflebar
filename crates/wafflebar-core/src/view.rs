@@ -130,6 +130,13 @@ pub enum View {
         content: Box<View>,
         classes: Vec<String>,
     },
+    /// The applications menu (E). A **marker** for host-rendered rich content: the host builds the
+    /// whole two-pane search/category/app widget from the host-owned app cache + `core::recents`,
+    /// and the reducer never describes the menu's interactive state (search text, selection) — that
+    /// lives in the host widget. The reducer only carries the plugin's *config* (which it does own):
+    /// pinned `favorites` (desktop-file ids) and the recents settings. Complex interactive surfaces
+    /// are host-rendered from GTK-free core data; see ARCHITECTURE.md / docs/UPSTREAM.md.
+    AppMenu { favorites: Vec<String>, show_recents: bool, max_recents: u32 },
     /// Nothing (an empty cell).
     Empty,
 }
@@ -248,6 +255,7 @@ impl View {
             View::Spacer => "spacer",
             View::Separator { .. } => "sep",
             View::Popover { .. } => "popover",
+            View::AppMenu { .. } => "appmenu",
             View::Empty => "empty",
         }
     }
@@ -282,7 +290,7 @@ impl View {
             | View::Col { classes, .. }
             | View::Button { classes, .. }
             | View::Popover { classes, .. } => Some(classes),
-            View::Spacer | View::Separator { .. } | View::Empty => None,
+            View::Spacer | View::Separator { .. } | View::AppMenu { .. } | View::Empty => None,
         }
     }
 }
