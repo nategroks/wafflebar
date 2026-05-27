@@ -280,7 +280,11 @@ pub fn render_view(view: &View, slot: usize, host: &Rc<Host>) -> gtk4::Widget {
                 right.connect_pressed(move |_, _, _, _| popover.popup());
                 b.add_controller(right);
             }
-            // Scroll → up/down actions (volume wheel). dy<0 is scroll-up.
+            // Scroll → discrete up/down actions (volume wheel). The View boundary is discrete (one
+            // action per tick); the renderer absorbs GTK4 smooth-scroll here so plugins never see
+            // sub-tick deltas: touchpads/high-res wheels emit many fractional `dy`s, which we
+            // accumulate and turn into whole-tick action dispatches. Direction is normalized by
+            // GTK4 (device + natural-scroll already applied), so dy<0 is consistently "up".
             if scroll_up.is_some() || scroll_down.is_some() {
                 let scroll = gtk4::EventControllerScroll::new(
                     gtk4::EventControllerScrollFlags::VERTICAL,
@@ -288,11 +292,25 @@ pub fn render_view(view: &View, slot: usize, host: &Rc<Host>) -> gtk4::Widget {
                 let host = host.clone();
                 let up = scroll_up.clone();
                 let down = scroll_down.clone();
+                let acc = std::cell::Cell::new(0.0_f64); // Fn (not FnMut): interior mutability
                 scroll.connect_scroll(move |_, _dx, dy| {
-                    let action = if dy < 0.0 { up.as_ref() } else { down.as_ref() };
-                    if let Some(a) = action {
-                        host.dispatch_action(slot, a);
+                    let mut total = acc.get() + dy;
+                    while total <= -1.0 {
+                        if let Some(a) = up.as_ref() {
+                            host.dispatch_action(slot, a);
+                        }
+                        total += 1.0;
                     }
+                    while total >= 1.0 {
+                        if let Some(a) = down.as_ref() {
+                            host.dispatch_action(slot, a);
+                        }
+                        total -= 1.0;
+                    }
+                    acc.set(total); // keep the sub-tick remainder for the next event
+                    // v1 always consumes. TODO(scroll): expose a `handled` flag in the reaction so
+                    // scroll can bubble on unhandled when nested scrollables (e.g. an
+                    // applicationsmenu category list) ship.
                     gtk4::glib::Propagation::Stop
                 });
                 b.add_controller(scroll);
