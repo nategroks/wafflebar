@@ -35,7 +35,7 @@ pub use config::{
 };
 pub use audio::{VolumeCommand, VolumeEvent, VOLUME_NORM};
 pub use cpu::CpuState;
-pub use freedesktop::{DesktopAction, DesktopApp, Launch};
+pub use freedesktop::{application_dirs, list_applications, DesktopAction, DesktopApp, Launch};
 pub use grid::{GridEngine, GridError, Placement};
 pub use memory::MemoryState;
 pub use net::NetworkState;

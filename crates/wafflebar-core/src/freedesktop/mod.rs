@@ -168,6 +168,60 @@ impl DesktopApp {
     }
 }
 
+/// XDG `applications` dirs in lookup order: `$XDG_DATA_HOME` then `$XDG_DATA_DIRS` (spec defaults).
+pub fn application_dirs() -> Vec<std::path::PathBuf> {
+    use std::path::PathBuf;
+    let mut dirs = Vec::new();
+    let data_home = std::env::var_os("XDG_DATA_HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share")));
+    if let Some(h) = data_home {
+        dirs.push(h.join("applications"));
+    }
+    let data_dirs = std::env::var_os("XDG_DATA_DIRS")
+        .map(|v| v.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "/usr/local/share:/usr/share".to_string());
+    for d in data_dirs.split(':').filter(|s| !s.is_empty()) {
+        dirs.push(PathBuf::from(d).join("applications"));
+    }
+    dirs
+}
+
+/// Every launchable application across the XDG dirs, sorted by name. Deduped by desktop-file id
+/// (the first dir in lookup order claims the id, per spec — a `~/.local` override hides a system
+/// entry). `NoDisplay` entries are excluded (they're meant to stay out of menus — note the launcher
+/// resolver *keeps* them for explicit references). This is the data layer for F4's application
+/// picker; E reuses it and adds the Menu-Spec category tree on top.
+pub fn list_applications() -> Vec<DesktopApp> {
+    let locales = locale::from_env();
+    let mut seen = std::collections::HashSet::new();
+    let mut apps = Vec::new();
+    for dir in application_dirs() {
+        let Ok(read) = std::fs::read_dir(&dir) else { continue };
+        for entry in read.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("desktop") {
+                continue;
+            }
+            let id = file_id(&path.to_string_lossy());
+            if !seen.insert(id) {
+                continue; // an earlier dir already claimed this id
+            }
+            let Ok(de) = DesktopEntry::from_path(path.clone(), Some(locales.as_slice())) else {
+                continue;
+            };
+            if de.no_display() {
+                continue; // hidden from menus (kept by the launcher only for explicit refs)
+            }
+            if let Some(app) = DesktopApp::from_entry(&de, &locales) {
+                apps.push(app);
+            }
+        }
+    }
+    apps.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    apps
+}
+
 /// Desktop file ID = filename without `.desktop`. (Full spec IDs encode nested
 /// `applications/` subdirs as `dir-name`; that needs the menu root and is an E1 concern.)
 fn file_id(path: &str) -> String {
