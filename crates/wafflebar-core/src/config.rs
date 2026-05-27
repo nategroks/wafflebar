@@ -33,7 +33,7 @@ pub enum ConfigError {
 }
 
 /// Top-level wafflebar configuration.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Config {
     /// Schema version (see [`SCHEMA_VERSION`]).
     #[serde(default = "default_schema")]
@@ -54,7 +54,7 @@ fn default_schema() -> u32 {
 }
 
 /// Where the bar sits and how it looks.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BarConfig {
     /// Which monitor(s): `"primary"` (default) / `"left"` / `"center"` / `"right"` (by layout
     /// position), `"all"` (one bar per monitor), or an exact connector / model name.
@@ -100,7 +100,7 @@ pub enum Position {
 }
 
 /// The grid track: a `rows × columns` matrix that modules are placed into.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GridConfig {
     /// Number of rows (>= 1).
     #[serde(default = "default_rows")]
@@ -127,7 +127,7 @@ fn default_columns() -> u32 {
 }
 
 /// One module placed on the bar.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ModuleConfig {
     /// Module type, e.g. `"clock"`, `"tags"`, `"cpu"`.
     #[serde(rename = "type")]
@@ -175,7 +175,7 @@ impl ModuleConfig {
 }
 
 /// A grid cell occupied by a module, with optional spans.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Cell {
     pub row: u32,
     pub col: u32,

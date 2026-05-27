@@ -106,6 +106,18 @@ impl Host {
         self.apply(slot, reaction);
     }
 
+    /// Deliver a live config edit to one slot's module (live reload) and apply its reaction.
+    pub fn configure_slot(self: &Rc<Self>, slot: usize, cfg: &wafflebar_core::ModuleConfig) {
+        let reaction = {
+            let mut slots = self.slots.borrow_mut();
+            if slot >= slots.len() {
+                return;
+            }
+            slots[slot].module.configure(cfg)
+        };
+        self.apply(slot, reaction);
+    }
+
     /// Render every slot's initial view.
     pub fn render_all(self: &Rc<Self>) {
         let n = self.slots.borrow().len();
