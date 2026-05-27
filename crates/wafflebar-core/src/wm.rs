@@ -92,6 +92,10 @@ pub enum WmCommand {
     CloseWindow(WindowId),
     /// Minimize/unminimize a window (foreign-toplevel `set_minimized`).
     SetMinimized(WindowId, bool),
+    /// Toggle the "show desktop" state. Only emitted by the showdesktop plugin, and only when the
+    /// backend reports [`WindowManager::supports_show_desktop`]; otherwise the plugin renders
+    /// nothing and never produces this.
+    ToggleShowDesktop,
 }
 
 /// Implemented by each compositor backend. The host drives event delivery via the backend's fd
@@ -101,4 +105,20 @@ pub trait WindowManager {
     fn snapshot(&self) -> Vec<WmEvent>;
     /// Perform a command (the declarative result of a module action).
     fn execute(&mut self, cmd: &WmCommand);
+
+    /// Whether this compositor has a meaningful "show desktop" action.
+    ///
+    /// There is no portable notion of this on tiling WMs: dwl has none at all; sway can be
+    /// scripted to minimize everything; Hyprland has a special workspace. Backends that can do it
+    /// override this and [`toggle_show_desktop`](Self::toggle_show_desktop). Default: `false`, so
+    /// the showdesktop plugin renders nothing rather than a dead button.
+    fn supports_show_desktop(&self) -> bool {
+        false
+    }
+
+    /// Toggle "show desktop". Only ever called when [`supports_show_desktop`](Self::supports_show_desktop)
+    /// is `true`; the default panics to catch a backend that claims support but forgot to implement.
+    fn toggle_show_desktop(&mut self) {
+        unimplemented!("backend claims show-desktop support but did not implement toggle")
+    }
 }
