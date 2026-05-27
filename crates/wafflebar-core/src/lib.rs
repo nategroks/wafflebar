@@ -16,6 +16,7 @@
 
 pub mod config;
 pub mod fake;
+pub mod freedesktop;
 pub mod grid;
 pub mod plugin;
 pub mod view;
