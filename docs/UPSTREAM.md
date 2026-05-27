@@ -89,6 +89,22 @@ future server-side surface (a Phase G notifications server, a Wafflebar control 
 the same shape: the GLib loop is the source of truth for stateful work; the zbus executor is a thin
 transport.
 
+**This is now the project's D-Bus-server idiom — validated by the SNI Watcher (D2), reused by the
+Notifications server (G).** Own the bus name; expose a minimal `Send + Sync` `#[interface]` (state in
+`Arc<Mutex<…>>` / atomics); bridge to the main thread; keep the GTK-free core data (`TrayItem`,
+`Notification`) at the boundary; render host-side. The bridge mechanism depends on whether a *natural
+bus signal* exists: the Watcher rides its own `ItemRegistered` (the Host subscribes to it), but the
+Notifications spec has no "posted" signal, so G uses an `async-channel` from the iface to a
+main-thread drain loop — `JoinHandle::abort`-style cleanliness, no manual thread management beyond the
+channel.
+
+**Server-side surfaces are in-process, not separate daemons, and don't fight an existing owner.**
+Notifications run in the bar process (the bar *is* the shell — like tray and menu), reusing the zbus
+connection + GLib loop; the GTK-free `core::notification` keeps the door open to lifting it to its own
+binary (v1→v2 isolation, for the server this time). One owner per session: acquire the name with
+`DoNotQueue` so contention is immediate, log-and-disable if another daemon (mako/dunst) holds it, and
+offer `--replace-notifications` (`ReplaceExisting | AllowReplacement`) to take over deliberately.
+
 ## Finish what's nearly done before opening new surface
 At a milestone boundary, prefer finishing a nearly-done feature over starting a new one. An 80%-done
 feature is a *quality* problem (works for the common case, breaks on edges — users experience it as
