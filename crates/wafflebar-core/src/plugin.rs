@@ -7,6 +7,7 @@
 //! serializable and makes the eventual external-process step a transport wrapper, not a rewrite.
 
 use crate::audio::{VolumeCommand, VolumeEvent};
+use crate::cpu::CpuState;
 use crate::freedesktop::Launch;
 use crate::memory::MemoryState;
 use crate::net::NetworkState;
@@ -31,6 +32,8 @@ pub enum Topic {
     /// Memory (RAM/swap) snapshots. The host starts the memory polling backend only if some plugin
     /// subscribes to this.
     Memory,
+    /// CPU load deltas. The host starts the CPU polling backend only if some plugin subscribes.
+    Cpu,
 }
 
 /// An event delivered to a subscribed module.
@@ -46,6 +49,8 @@ pub enum Event {
     Network(NetworkState),
     /// A memory snapshot from the host's polling backend.
     Memory(MemoryState),
+    /// A CPU load delta from the host's polling backend.
+    Cpu(CpuState),
 }
 
 /// A module's response to an event or action: whether its view changed, plus any side effects

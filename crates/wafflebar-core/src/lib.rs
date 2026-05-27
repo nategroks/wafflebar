@@ -16,6 +16,7 @@
 
 pub mod audio;
 pub mod config;
+pub mod cpu;
 pub mod fake;
 pub mod freedesktop;
 pub mod grid;
@@ -31,6 +32,7 @@ pub use config::{
     SCHEMA_VERSION,
 };
 pub use audio::{VolumeCommand, VolumeEvent, VOLUME_NORM};
+pub use cpu::CpuState;
 pub use freedesktop::{DesktopAction, DesktopApp, Launch};
 pub use grid::{GridEngine, GridError, Placement};
 pub use memory::MemoryState;
