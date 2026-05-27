@@ -7,11 +7,14 @@
 //! the host-owned [`MenuState`] (refreshed by a directory watch in `app.rs`); launches go straight
 //! to the host executor. See `View::AppMenu` and docs/UPSTREAM.md.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use gtk4::prelude::*;
-use gtk4::{Box as GtkBox, Image, Label, ListBox, ListBoxRow, Orientation, Popover, ScrolledWindow, SearchEntry};
+use gtk4::{
+    gdk, glib, Box as GtkBox, EventControllerFocus, EventControllerKey, Image, Label, ListBox,
+    ListBoxRow, Orientation, Popover, PropagationPhase, ScrolledWindow, SearchEntry,
+};
 use tracing::warn;
 use wafflebar_core::{categorized, DesktopApp, Recents};
 
@@ -28,6 +31,107 @@ pub struct MenuState {
 /// Fixed popover size — sized for typical desktop displays; adapt to display dimensions in v2.
 const MENU_W: i32 = 420;
 const MENU_H: i32 = 520;
+
+// --- Keyboard navigation (E3) ---
+//
+// The nav logic is a pure function so it's testable without GTK (the sandbox can't inject input,
+// and GTK widget tests can't run — one-init-per-process). The widget below is a thin translator:
+// it normalizes a GTK key event to `NavKey`, calls `handle_key`, and applies the `KeyAction`.
+// (Third instance of the "extract the decision from the I/O" testability pattern, after FakeWm and
+// the recents internals — see docs/UPSTREAM.md.)
+
+/// Which pane the keyboard is in.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Pane {
+    Search,
+    Categories,
+    Apps,
+}
+
+/// A normalized key (GTK-free). The translator emits `Char` only for an *unmodified* printable key,
+/// so compositor bindings (Super+key) and stray Ctrl/Alt combos never reach `handle_key`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum NavKey {
+    Up,
+    Down,
+    Left,
+    Right,
+    Tab,
+    ShiftTab,
+    Enter,
+    Escape,
+    CtrlF,
+    Char(char),
+}
+
+/// What the widget should do. `Move` is a relative intent on the focused pane, **clamped by the
+/// caller** (`handle_key` doesn't know list lengths). `NoOp` means "let GTK handle it natively"
+/// (text-cursor motion, native insert) — *not* "ignore".
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum KeyAction {
+    Focus(Pane),
+    Move(i32),
+    Launch,
+    Close,
+    TypeIntoSearch(char),
+    NoOp,
+}
+
+/// Pure keyboard-nav decision. State is just the focused pane and whether the search box is empty;
+/// selection indices live in the `ListBox`es (GTK owns them), so there's no state to keep in sync.
+pub fn handle_key(pane: Pane, search_empty: bool, key: NavKey) -> KeyAction {
+    use KeyAction as A;
+    use NavKey as K;
+    use Pane::{Apps, Categories, Search};
+    match key {
+        K::Escape => A::Close,
+        K::CtrlF => A::Focus(Search),
+        // Tab cycles Search → Categories → Apps → Search; Shift+Tab reverses.
+        K::Tab => A::Focus(match pane {
+            Search => Categories,
+            Categories => Apps,
+            Apps => Search,
+        }),
+        K::ShiftTab => A::Focus(match pane {
+            Search => Apps,
+            Categories => Search,
+            Apps => Categories,
+        }),
+        // Unmodified printable: in a pane, divert to search; in search, GTK inserts natively.
+        K::Char(c) => match pane {
+            Search => A::NoOp,
+            Categories | Apps => A::TypeIntoSearch(c),
+        },
+        K::Up => match pane {
+            Categories | Apps => A::Move(-1),
+            Search => A::NoOp,
+        },
+        K::Down => match pane {
+            Categories | Apps => A::Move(1),
+            Search => A::Focus(Apps), // dive into results
+        },
+        K::Left => match pane {
+            Apps => A::Focus(Categories),
+            _ => A::NoOp,
+        },
+        K::Right => match pane {
+            Categories => A::Focus(Apps),
+            _ => A::NoOp,
+        },
+        K::Enter => match pane {
+            Apps => A::Launch,
+            Categories => A::Focus(Apps),
+            // Don't launch a default selection the user never navigated to.
+            Search => {
+                if search_empty {
+                    A::NoOp
+                } else {
+                    A::Launch
+                }
+            }
+        },
+    }
+}
 
 /// Build the applications-menu widget (the popover content). Reads the current app cache + recents
 /// from the host; rebuilt when the watch refreshes the cache (via a re-render), so opening just
@@ -78,6 +182,10 @@ pub fn build_appmenu(favorites: &[String], show_recents: bool, max_recents: u32,
     // The apps currently shown in the app pane, so row-activation can map an index back to an app.
     let shown: Rc<RefCell<Vec<DesktopApp>>> = Rc::new(RefCell::new(Vec::new()));
     let sections = Rc::new(sections);
+    // Keyboard focus is the one bit of nav state we own (not cleanly queryable from GTK at key
+    // time): a `Cell` because we read/write it from event closures that borrow their environment
+    // immutably. The key controller and the mouse handlers both update it.
+    let pane = Rc::new(Cell::new(Pane::Search));
 
     for (name, _) in sections.iter() {
         cat_list.append(&text_row(name));
@@ -85,9 +193,11 @@ pub fn build_appmenu(favorites: &[String], show_recents: bool, max_recents: u32,
 
     // Category selection (only meaningful when not searching): show that category's apps.
     cat_list.connect_row_selected({
-        let (sections, shown, app_list, host) = (sections.clone(), shown.clone(), app_list.clone(), host.clone());
+        let (sections, shown, app_list, host, pane) =
+            (sections.clone(), shown.clone(), app_list.clone(), host.clone(), pane.clone());
         move |_, row| {
             if let Some(idx) = row.map(|r| r.index() as usize) {
+                pane.set(Pane::Categories);
                 if let Some((_, apps)) = sections.get(idx) {
                     populate_apps(&app_list, &shown, apps, &host);
                 }
@@ -127,6 +237,61 @@ pub fn build_appmenu(favorites: &[String], show_recents: bool, max_recents: u32,
         }
     });
 
+    // Track focus when the user clicks into search; focus search when the menu opens (so the user
+    // can type immediately).
+    let focus_search = EventControllerFocus::new();
+    focus_search.connect_enter({
+        let pane = pane.clone();
+        move |_| pane.set(Pane::Search)
+    });
+    search.add_controller(focus_search);
+    search.connect_map(|s| {
+        s.grab_focus();
+    });
+
+    // Keyboard navigation (E3): a capture-phase controller decides Up/Down/Tab/etc. *before* the
+    // ListBoxes' built-in nav, routing through the pure `handle_key`. `NoOp` → propagate so GTK
+    // handles it natively (text-cursor motion, native search insert).
+    let keys = EventControllerKey::new();
+    keys.set_propagation_phase(PropagationPhase::Capture);
+    keys.connect_key_pressed({
+        let (pane, search, cat_list, app_list, shown, host) = (
+            pane.clone(),
+            search.clone(),
+            cat_list.clone(),
+            app_list.clone(),
+            shown.clone(),
+            host.clone(),
+        );
+        move |_, keyval, _, state| {
+            let Some(key) = translate(keyval, state) else {
+                return glib::Propagation::Proceed;
+            };
+            match handle_key(pane.get(), search.text().is_empty(), key) {
+                KeyAction::NoOp => return glib::Propagation::Proceed,
+                KeyAction::Close => popdown(&search),
+                KeyAction::Focus(p) => focus_pane(p, &pane, &search, &cat_list, &app_list),
+                KeyAction::Move(delta) => {
+                    let list = if pane.get() == Pane::Categories { &cat_list } else { &app_list };
+                    move_selection(list, delta);
+                }
+                KeyAction::Launch => {
+                    launch_selected(&app_list, &shown, &host);
+                    popdown(&search);
+                }
+                KeyAction::TypeIntoSearch(c) => {
+                    focus_pane(Pane::Search, &pane, &search, &cat_list, &app_list);
+                    let mut text = search.text().to_string();
+                    text.push(c);
+                    search.set_text(&text);
+                    search.set_position(-1);
+                }
+            }
+            glib::Propagation::Stop
+        }
+    });
+    root.add_controller(keys);
+
     // Open on the first category so the app pane is never blank.
     cat_list.select_row(cat_list.row_at_index(0).as_ref());
 
@@ -143,6 +308,83 @@ pub fn build_appmenu(favorites: &[String], show_recents: bool, max_recents: u32,
 fn find_app(apps: &[DesktopApp], id: &str) -> Option<DesktopApp> {
     let want = id.strip_suffix(".desktop").unwrap_or(id);
     apps.iter().find(|a| a.file_id == want).cloned()
+}
+
+/// Normalize a GTK key event to a `NavKey`, or `None` to let GTK handle it. Emits `Char` only for an
+/// *unmodified* printable key, so compositor (Super) and stray Alt/Ctrl combos pass through.
+fn translate(keyval: gdk::Key, state: gdk::ModifierType) -> Option<NavKey> {
+    use gdk::Key;
+    let ctrl = state.contains(gdk::ModifierType::CONTROL_MASK);
+    let shift = state.contains(gdk::ModifierType::SHIFT_MASK);
+    let other = state.intersects(gdk::ModifierType::ALT_MASK | gdk::ModifierType::SUPER_MASK);
+    match keyval {
+        Key::Up => Some(NavKey::Up),
+        Key::Down => Some(NavKey::Down),
+        Key::Left => Some(NavKey::Left),
+        Key::Right => Some(NavKey::Right),
+        Key::Tab | Key::ISO_Left_Tab => Some(if shift { NavKey::ShiftTab } else { NavKey::Tab }),
+        Key::Return | Key::KP_Enter => Some(NavKey::Enter),
+        Key::Escape => Some(NavKey::Escape),
+        _ if ctrl && keyval == Key::f => Some(NavKey::CtrlF),
+        _ if !ctrl && !other => keyval.to_unicode().filter(|c| !c.is_control()).map(NavKey::Char),
+        _ => None,
+    }
+}
+
+/// Apply a `Focus` action: track it, grab GTK focus, and select the pane's first row if none yet.
+fn focus_pane(p: Pane, pane: &Rc<Cell<Pane>>, search: &SearchEntry, cat: &ListBox, app: &ListBox) {
+    pane.set(p);
+    match p {
+        Pane::Search => {
+            search.grab_focus();
+        }
+        Pane::Categories => {
+            if cat.selected_row().is_none() {
+                cat.select_row(cat.row_at_index(0).as_ref());
+            }
+            cat.grab_focus();
+        }
+        Pane::Apps => {
+            if app.selected_row().is_none() {
+                app.select_row(app.row_at_index(0).as_ref());
+            }
+            app.grab_focus();
+        }
+    }
+}
+
+/// Move the selection in `list` by `delta`, clamped to the row range (no wrap).
+fn move_selection(list: &ListBox, delta: i32) {
+    let n = row_count(list);
+    if n == 0 {
+        return;
+    }
+    let cur = list.selected_row().map(|r| r.index()).unwrap_or(0);
+    let next = (cur + delta).clamp(0, n - 1);
+    list.select_row(list.row_at_index(next).as_ref());
+}
+
+fn row_count(list: &ListBox) -> i32 {
+    let mut n = 0;
+    let mut child = list.first_child();
+    while let Some(w) = child {
+        n += 1;
+        child = w.next_sibling();
+    }
+    n
+}
+
+fn launch_selected(app_list: &ListBox, shown: &Rc<RefCell<Vec<DesktopApp>>>, host: &Rc<Host>) {
+    let idx = app_list.selected_row().map(|r| r.index() as usize).unwrap_or(0);
+    if let Some(app) = shown.borrow().get(idx).cloned() {
+        launch(&app, host);
+    }
+}
+
+fn popdown(widget: &impl IsA<gtk4::Widget>) {
+    if let Some(pop) = widget.ancestor(Popover::static_type()).and_downcast::<Popover>() {
+        pop.popdown();
+    }
 }
 
 /// Apps across all sections matching the query, de-duplicated by id, name-sorted.
@@ -243,4 +485,48 @@ fn dim_row(text: &str) -> ListBoxRow {
     row.set_child(Some(&dim(text)));
     row.set_selectable(false);
     row
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{handle_key, KeyAction as A, NavKey as K, Pane};
+
+    #[test]
+    fn keyboard_nav_transitions() {
+        // Escape / Ctrl+F from any pane.
+        assert_eq!(handle_key(Pane::Apps, false, K::Escape), A::Close);
+        assert_eq!(handle_key(Pane::Categories, true, K::CtrlF), A::Focus(Pane::Search));
+
+        // Search: Down dives into results; Up/native-insert are NoOp; Enter launches only with text.
+        assert_eq!(handle_key(Pane::Search, false, K::Down), A::Focus(Pane::Apps));
+        assert_eq!(handle_key(Pane::Search, false, K::Up), A::NoOp);
+        assert_eq!(handle_key(Pane::Search, false, K::Char('a')), A::NoOp);
+        assert_eq!(handle_key(Pane::Search, true, K::Enter), A::NoOp);
+        assert_eq!(handle_key(Pane::Search, false, K::Enter), A::Launch);
+
+        // Type-to-search from the panes.
+        assert_eq!(handle_key(Pane::Categories, true, K::Char('x')), A::TypeIntoSearch('x'));
+        assert_eq!(handle_key(Pane::Apps, true, K::Char('z')), A::TypeIntoSearch('z'));
+
+        // Categories: Up/Down move; Right/Enter dive to apps; Left does nothing.
+        assert_eq!(handle_key(Pane::Categories, true, K::Up), A::Move(-1));
+        assert_eq!(handle_key(Pane::Categories, true, K::Down), A::Move(1));
+        assert_eq!(handle_key(Pane::Categories, true, K::Right), A::Focus(Pane::Apps));
+        assert_eq!(handle_key(Pane::Categories, true, K::Enter), A::Focus(Pane::Apps));
+        assert_eq!(handle_key(Pane::Categories, true, K::Left), A::NoOp);
+
+        // Apps: Up/Down move; Left back to categories; Right nothing; Enter launches (default sel).
+        assert_eq!(handle_key(Pane::Apps, true, K::Up), A::Move(-1));
+        assert_eq!(handle_key(Pane::Apps, true, K::Down), A::Move(1));
+        assert_eq!(handle_key(Pane::Apps, true, K::Left), A::Focus(Pane::Categories));
+        assert_eq!(handle_key(Pane::Apps, true, K::Right), A::NoOp);
+        assert_eq!(handle_key(Pane::Apps, true, K::Enter), A::Launch);
+
+        // Tab cycles all three regions; Shift+Tab reverses.
+        assert_eq!(handle_key(Pane::Search, true, K::Tab), A::Focus(Pane::Categories));
+        assert_eq!(handle_key(Pane::Categories, true, K::Tab), A::Focus(Pane::Apps));
+        assert_eq!(handle_key(Pane::Apps, true, K::Tab), A::Focus(Pane::Search));
+        assert_eq!(handle_key(Pane::Apps, true, K::ShiftTab), A::Focus(Pane::Categories));
+        assert_eq!(handle_key(Pane::Search, true, K::ShiftTab), A::Focus(Pane::Apps));
+    }
 }
