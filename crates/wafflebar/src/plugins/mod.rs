@@ -7,6 +7,7 @@
 pub mod clock;
 pub mod dwl;
 pub mod launcher;
+pub mod memory;
 pub mod network;
 pub mod separator;
 pub mod showdesktop;
@@ -40,6 +41,7 @@ pub fn build(kind: &str, output: &str, cfg: &ModuleConfig, caps: &Caps) -> Box<d
         "showdesktop" => Box::new(showdesktop::ShowDesktop::new(caps)),
         "volume" => Box::new(volume::Volume::new()),
         "network" => Box::new(network::Network::new()),
+        "memory" => Box::new(memory::Memory::new()),
         other => Box::new(Placeholder::new(other)),
     }
 }

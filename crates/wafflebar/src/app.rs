@@ -18,6 +18,7 @@ use wafflebar_core::{
 
 use crate::event_loop;
 use crate::plugins;
+use crate::plugins::memory::backend::{MemoryBackend, ProcMemBackend};
 use crate::plugins::network::backend::{NetworkBackend, NmBackend};
 use crate::plugins::volume::backend::PulseBackend;
 use crate::render::{Host, PluginSlot};
@@ -247,6 +248,7 @@ fn build_grid_and_host(
     let subscribes = |topic: &Topic| slots.iter().any(|s| s.module.subscribe().contains(topic));
     let needs_audio = subscribes(&Topic::Audio);
     let needs_network = subscribes(&Topic::Network);
+    let needs_memory = subscribes(&Topic::Memory);
     let audio = if needs_audio {
         PulseBackend::new().map(|b| Rc::new(RefCell::new(b)))
     } else {
@@ -282,6 +284,28 @@ fn build_grid_and_host(
                 h.deliver_event(&Event::Network(state));
             }
         })));
+    }
+
+    // Memory backend: polls /proc/meminfo on a GLib timer at the configured interval (5s default).
+    // The SourceId is dropped but the source persists (it owns the closure), like the fd watch.
+    if needs_memory {
+        let secs = config
+            .modules
+            .iter()
+            .find(|m| m.kind == "memory")
+            .and_then(|m| m.opt_i64("interval"))
+            .filter(|n| *n > 0)
+            .map(|n| n as u64)
+            .unwrap_or(5);
+        let host_weak = Rc::downgrade(&host);
+        let _mem_source = ProcMemBackend.start(
+            std::time::Duration::from_secs(secs),
+            Box::new(move |state| {
+                if let Some(h) = host_weak.upgrade() {
+                    h.deliver_event(&Event::Memory(state));
+                }
+            }),
+        );
     }
     host
 }

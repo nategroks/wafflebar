@@ -50,6 +50,13 @@ window#wafflebar {
 }
 .wb-menu-item:hover { background-color: #434c5e; }
 
+/* memory: RAM usage percent; pressure classes tint as it climbs */
+.memory { padding: 0 6px; }
+.memory .mem-icon { color: #a3be8c; }
+.memory.high .mem-label    { color: #ebcb8b; }
+.memory.critical .mem-label { color: #bf616a; font-weight: bold; }
+.memory.swapping .mem-icon { color: #d08770; }
+
 /* network: connection icon + name; click opens the editor */
 .network { padding: 0 6px; }
 .network .net-icon { color: #81a1c1; }
