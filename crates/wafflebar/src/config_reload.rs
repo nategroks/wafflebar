@@ -8,11 +8,13 @@
 //! (write tempfile + rename over the original), which deletes the watched file and would kill a
 //! file-level watch. A directory watch filtered to the config filename survives the rename.
 //!
-//! F2 scope: the option-reconfigure path is live. Structural changes (a `[[modules]]` entry
-//! added/removed/reordered or its `type` changed, or any `[bar]`/`[grid]` change) are *detected*
-//! and logged "restart to apply" — the hot in-place rebuild (replacing slots + grid and re-wiring
-//! timers/backends) is F2b. `diff_config` already distinguishes the cases, so F2b just swaps the
-//! structural action from log to rebuild.
+//! Both paths are live. Option-only changes call `configure()` on the affected plugins. Structural
+//! changes (a `[[modules]]` entry added/removed/reordered or its `type`/placement changed, or any
+//! `[bar]`/`[grid]` change) run the hot in-place rebuild (F2b): tear down all plugins, reconstruct
+//! from the new config, swap the grid, and reconcile timers — see [`watch_config`]'s `rebuild`. The
+//! audio/network/tray *backends* are not reconciled (they hang off the host's immutable sinks);
+//! hot-starting them is deferred to F2c, and the rebuild warns when an edit needs one that isn't
+//! running.
 
 use std::cell::RefCell;
 use std::path::PathBuf;
@@ -65,9 +67,15 @@ struct ReloadState {
     debounce: Option<glib::SourceId>,
 }
 
-/// Start watching `path`; apply option edits to `host` live. The `FileMonitor` is leaked to live
-/// for the process (like the fd watch); cheap and there's exactly one per bar.
-pub fn watch_config(path: PathBuf, host: Rc<Host>, initial: Config) {
+/// Start watching `path`; apply edits live — option changes via `host`, structural changes via
+/// `rebuild` (F2b). The `FileMonitor` is leaked to live for the process (like the fd watch); cheap
+/// and there's exactly one per bar.
+pub fn watch_config(
+    path: PathBuf,
+    host: Rc<Host>,
+    rebuild: Rc<dyn Fn(&Config)>,
+    initial: Config,
+) {
     let Some(dir) = path.parent().map(|p| p.to_path_buf()) else {
         return;
     };
@@ -94,10 +102,11 @@ pub fn watch_config(path: PathBuf, host: Rc<Host>, initial: Config) {
         if let Some(id) = pending {
             id.remove();
         }
-        let (state_cb, path_cb, host_cb) = (state.clone(), path.clone(), host.clone());
+        let (state_cb, path_cb, host_cb, rebuild_cb) =
+            (state.clone(), path.clone(), host.clone(), rebuild.clone());
         let id = glib::timeout_add_local(Duration::from_millis(100), move || {
             state_cb.borrow_mut().debounce = None;
-            reload(&path_cb, &host_cb, &state_cb);
+            reload(&path_cb, &host_cb, &rebuild_cb, &state_cb);
             glib::ControlFlow::Break
         });
         state.borrow_mut().debounce = Some(id);
@@ -105,7 +114,12 @@ pub fn watch_config(path: PathBuf, host: Rc<Host>, initial: Config) {
     std::mem::forget(monitor); // lives for the process; nothing to clean up before exit
 }
 
-fn reload(path: &PathBuf, host: &Rc<Host>, state: &Rc<RefCell<ReloadState>>) {
+fn reload(
+    path: &PathBuf,
+    host: &Rc<Host>,
+    rebuild: &Rc<dyn Fn(&Config)>,
+    state: &Rc<RefCell<ReloadState>>,
+) {
     let new = match Config::load(path) {
         Ok(c) => c,
         Err(e) => {
@@ -125,8 +139,11 @@ fn reload(path: &PathBuf, host: &Rc<Host>, state: &Rc<RefCell<ReloadState>>) {
             }
         }
         ReloadPlan::Structural => {
-            // TODO(F2b): hot rebuild — replace slots + grid in place and re-wire timers/backends.
-            warn!("config reload: structural change (modules/grid/bar) — restart to apply");
+            // F2b: hot rebuild — tear down all plugins, reconstruct from the new config, swap the
+            // grid in place, and reconcile timers. Backends aren't reconciled here (F2c); the
+            // rebuild closure warns if an edit adds the first consumer of an unstarted backend.
+            debug!("config reload: structural change — rebuilding plugins in place");
+            rebuild(&new);
         }
     }
     state.borrow_mut().cached = new;

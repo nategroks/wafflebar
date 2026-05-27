@@ -106,6 +106,34 @@ impl Host {
         self.apply(slot, reaction);
     }
 
+    /// Does any current slot subscribe to `topic`? Used by the structural rebuild to decide which
+    /// backends/timers the new module set needs (F2b reconciliation).
+    pub fn subscribes(&self, topic: &Topic) -> bool {
+        self.slots
+            .borrow()
+            .iter()
+            .any(|s| s.module.subscribe().contains(topic))
+    }
+
+    /// Swap the entire slot set in place (structural reload, F2b). The host itself — and all its
+    /// wiring (sinks, fd watch, backends holding `Weak<Host>`) — survives, so only the reducers and
+    /// their containers are replaced. The caller swaps the grid (which drops the old containers) and
+    /// reconciles timers afterward.
+    pub fn replace_slots(self: &Rc<Self>, new_slots: Vec<PluginSlot>) {
+        {
+            // Tear down outgoing plugins *before* they leave the vector, while each still owns its
+            // `&mut self`. Every v1 plugin's `teardown` is a no-op — they hold no resources (the
+            // pure-reducer invariant; live resources are host-level, see app.rs) — but the hook is
+            // honored at a well-defined moment so a future resource-owning plugin gets clean cleanup
+            // rather than relying on Drop order.
+            let mut slots = self.slots.borrow_mut();
+            for slot in slots.iter_mut() {
+                slot.module.teardown();
+            }
+        }
+        *self.slots.borrow_mut() = new_slots;
+    }
+
     /// Deliver a live config edit to one slot's module (live reload) and apply its reaction.
     pub fn configure_slot(self: &Rc<Self>, slot: usize, cfg: &wafflebar_core::ModuleConfig) {
         let reaction = {
