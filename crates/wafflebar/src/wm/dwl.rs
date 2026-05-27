@@ -11,11 +11,15 @@ use std::os::fd::{AsFd, AsRawFd, RawFd};
 
 use anyhow::{bail, Result};
 use tracing::debug;
-use wafflebar_core::{Tag, TagState, WindowManager, WmCommand, WmEvent};
+use wafflebar_core::{Tag, TagState, Window, WindowId, WindowManager, WmCommand, WmEvent};
 use wayland_client::protocol::wl_output::{self, WlOutput};
 use wayland_client::protocol::wl_registry::{self, WlRegistry};
 use wayland_client::protocol::wl_seat::{self, WlSeat};
-use wayland_client::{Connection, Dispatch, EventQueue, QueueHandle};
+use wayland_client::{event_created_child, Connection, Dispatch, EventQueue, Proxy, QueueHandle};
+use wayland_protocols_wlr::foreign_toplevel::v1::client::{
+    zwlr_foreign_toplevel_handle_v1::{self, ZwlrForeignToplevelHandleV1},
+    zwlr_foreign_toplevel_manager_v1::{self, ZwlrForeignToplevelManagerV1},
+};
 
 /// `wayland-scanner`-generated client bindings for dwl-ipc-unstable-v2.
 #[allow(non_snake_case, clippy::all)]
@@ -53,13 +57,27 @@ struct OutputState {
     acc_appid: String,
 }
 
+/// A foreign-toplevel we track. // Handle lifetime: dropped (+ `destroy()`) on the `Closed` event.
+struct Toplevel {
+    handle: ZwlrForeignToplevelHandleV1,
+    wid: WindowId,
+    title: String,
+    app_id: String,
+    focused: bool,
+    minimized: bool,
+    outputs: Vec<String>,
+}
+
 #[derive(Default)]
 struct State {
     manager: Option<ZdwlIpcManagerV2>,
-    /// Bound + cached now though unused until PR2 (foreign-toplevel `activate` needs a seat).
+    ft_manager: Option<ZwlrForeignToplevelManagerV1>,
+    /// Cached for foreign-toplevel `activate` (the request needs a `wl_seat`).
     seat: Option<WlSeat>,
     next_oid: u32,
+    next_wid: WindowId,
     outputs: Vec<OutputState>,
+    toplevels: Vec<Toplevel>,
     pending: Vec<WmEvent>,
 }
 
@@ -74,6 +92,38 @@ impl State {
             if o.ipc.is_none() {
                 o.ipc = Some(mgr.get_output(&o.wl_output, qh, oid));
             }
+        }
+    }
+
+    fn toplevel_mut(&mut self, handle: &ZwlrForeignToplevelHandleV1) -> Option<&mut Toplevel> {
+        let id = handle.id();
+        self.toplevels.iter_mut().find(|t| t.handle.id() == id)
+    }
+
+    /// Resolve a `wl_output` (same connection) to its connector name.
+    fn output_name(&self, output: &WlOutput) -> Option<String> {
+        let id = output.id();
+        self.outputs
+            .iter()
+            .find(|o| o.wl_output.id() == id)
+            .map(|o| o.name.clone())
+    }
+
+    /// The current window list as a `WmEvent::Windows`.
+    fn windows_event(&self) -> WmEvent {
+        WmEvent::Windows {
+            windows: self
+                .toplevels
+                .iter()
+                .map(|t| Window {
+                    id: t.wid,
+                    title: t.title.clone(),
+                    app_id: t.app_id.clone(),
+                    focused: t.focused,
+                    minimized: t.minimized,
+                    outputs: t.outputs.clone(),
+                })
+                .collect(),
         }
     }
 }
@@ -145,6 +195,7 @@ impl WindowManager for DwlBackend {
                 app_id: o.appid.clone(),
             });
         }
+        out.push(self.state.windows_event());
         out
     }
 
@@ -164,10 +215,30 @@ impl WindowManager for DwlBackend {
                     }
                 }
             }
-            // window commands (activate/close/minimize) arrive with foreign-toplevel in PR2.
-            _ => {}
+            WmCommand::ActivateWindow(id) => {
+                if let (Some(t), Some(seat)) = (
+                    self.state.toplevels.iter().find(|t| t.wid == *id),
+                    self.state.seat.as_ref(),
+                ) {
+                    t.handle.activate(seat);
+                }
+            }
+            WmCommand::CloseWindow(id) => {
+                if let Some(t) = self.state.toplevels.iter().find(|t| t.wid == *id) {
+                    t.handle.close();
+                }
+            }
+            WmCommand::SetMinimized(id, min) => {
+                if let Some(t) = self.state.toplevels.iter().find(|t| t.wid == *id) {
+                    if *min {
+                        t.handle.set_minimized();
+                    } else {
+                        t.handle.unset_minimized();
+                    }
+                }
+            }
         }
-        // Flush after every command — GLib's fd integration won't flush our requests for us.
+        // Flush after every command — the poll loop won't flush our requests for us.
         let _ = self.conn.flush();
     }
 }
@@ -226,6 +297,14 @@ impl Dispatch<WlRegistry, ()> for State {
             }
             "wl_seat" => {
                 state.seat = Some(registry.bind::<WlSeat, _, _>(name, version.min(7), qh, ()));
+            }
+            "zwlr_foreign_toplevel_manager_v1" => {
+                state.ft_manager = Some(registry.bind::<ZwlrForeignToplevelManagerV1, _, _>(
+                    name,
+                    version.min(3),
+                    qh,
+                    (),
+                ));
             }
             _ => {}
         }
@@ -323,6 +402,116 @@ impl Dispatch<ZdwlIpcOutputV2, u32> for State {
                 });
             }
             _ => {} // active/fullscreen/floating/layout(index)/toggle_visibility: not needed for v1
+        }
+    }
+}
+
+// ---- foreign-toplevel (taskbar) ----
+
+impl Dispatch<ZwlrForeignToplevelManagerV1, ()> for State {
+    fn event(
+        state: &mut Self,
+        _: &ZwlrForeignToplevelManagerV1,
+        event: zwlr_foreign_toplevel_manager_v1::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        match event {
+            zwlr_foreign_toplevel_manager_v1::Event::Toplevel { toplevel } => {
+                let wid = state.next_wid;
+                state.next_wid += 1;
+                state.toplevels.push(Toplevel {
+                    handle: toplevel,
+                    wid,
+                    title: String::new(),
+                    app_id: String::new(),
+                    focused: false,
+                    minimized: false,
+                    outputs: Vec::new(),
+                });
+            }
+            zwlr_foreign_toplevel_manager_v1::Event::Finished => {}
+            _ => {}
+        }
+    }
+
+    // The `toplevel` event creates a new handle object; wayland-rs needs to know its udata.
+    event_created_child!(State, ZwlrForeignToplevelManagerV1, [
+        zwlr_foreign_toplevel_manager_v1::EVT_TOPLEVEL_OPCODE => (ZwlrForeignToplevelHandleV1, ()),
+    ]);
+}
+
+impl Dispatch<ZwlrForeignToplevelHandleV1, ()> for State {
+    fn event(
+        state: &mut Self,
+        handle: &ZwlrForeignToplevelHandleV1,
+        event: zwlr_foreign_toplevel_handle_v1::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        use zwlr_foreign_toplevel_handle_v1::Event;
+        match event {
+            Event::Title { title } => {
+                if let Some(t) = state.toplevel_mut(handle) {
+                    t.title = title;
+                }
+            }
+            Event::AppId { app_id } => {
+                if let Some(t) = state.toplevel_mut(handle) {
+                    t.app_id = app_id;
+                }
+            }
+            Event::OutputEnter { output } => {
+                if let Some(name) = state.output_name(&output) {
+                    if let Some(t) = state.toplevel_mut(handle) {
+                        if !t.outputs.contains(&name) {
+                            t.outputs.push(name);
+                        }
+                    }
+                }
+            }
+            Event::OutputLeave { output } => {
+                if let Some(name) = state.output_name(&output) {
+                    if let Some(t) = state.toplevel_mut(handle) {
+                        t.outputs.retain(|o| o != &name);
+                    }
+                }
+            }
+            Event::State { state: arr } => {
+                // wl_array of u32 state enum values (1=minimized, 2=activated per protocol).
+                let mut focused = false;
+                let mut minimized = false;
+                for chunk in arr.chunks_exact(4) {
+                    match u32::from_ne_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]) {
+                        1 => minimized = true,
+                        2 => focused = true,
+                        _ => {}
+                    }
+                }
+                if let Some(t) = state.toplevel_mut(handle) {
+                    t.focused = focused;
+                    t.minimized = minimized;
+                }
+            }
+            // `done` commits a consistent batch — only now do we emit (avoids mid-update fl: the
+            // done-event atomicity guarantee).
+            Event::Done => {
+                let ev = state.windows_event();
+                state.pending.push(ev);
+            }
+            Event::Closed => {
+                // Handle lifetime: release the proxy and drop our entry, then emit the new list.
+                let id = handle.id();
+                if let Some(pos) = state.toplevels.iter().position(|t| t.handle.id() == id) {
+                    state.toplevels[pos].handle.destroy();
+                    state.toplevels.remove(pos);
+                }
+                let ev = state.windows_event();
+                state.pending.push(ev);
+            }
+            _ => {} // parent, etc.
         }
     }
 }

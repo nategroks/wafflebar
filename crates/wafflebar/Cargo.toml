@@ -22,4 +22,5 @@ chrono = "0.4.44"
 clap = { version = "4.6.1", features = ["derive"] }
 wayland-client = "0.31.14"
 wayland-scanner = "0.31.10"
+wayland-protocols-wlr = { version = "0.3.12", features = ["client"] }
 # GTK + Wayland deps are added via `cargo add` (M1) so versions resolve compatibly.

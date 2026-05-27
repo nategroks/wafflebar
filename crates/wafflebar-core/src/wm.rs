@@ -55,6 +55,9 @@ pub struct Window {
     pub app_id: String,
     pub focused: bool,
     pub minimized: bool,
+    /// Output (connector) names this window is present on (from foreign-toplevel
+    /// `output_enter`/`output_leave`). Empty = not yet reported / show everywhere.
+    pub outputs: Vec<String>,
 }
 
 /// State changes a backend publishes onto the event bus. A backend emits a full snapshot of the
