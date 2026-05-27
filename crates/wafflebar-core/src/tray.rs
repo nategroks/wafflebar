@@ -5,6 +5,7 @@
 //! commands, exactly like the audio/network split. v1 (D2a) carries what an icon button needs;
 //! menus (DBusMenu), pixmap icons, scroll, and attention/overlay icons land in D2b/D2c.
 
+use crate::view::MenuItem;
 use serde::{Deserialize, Serialize};
 
 /// SNI `Status`. `Passive` items are hidden (the spec's "available but not shown"); `Active` and
@@ -34,6 +35,10 @@ pub struct TrayItem {
     /// D2c). Resolved through the GTK icon theme, honoring the item's `IconThemePath` if any.
     pub icon_name: Option<String>,
     pub status: TrayStatus,
+    /// The item's context menu (DBusMenu), as flat top-level [`MenuItem`]s — empty if the item has
+    /// no `Menu`. Each `Item`'s action is `menu:<key>:<dbusmenu-id>`, routed back to
+    /// [`TrayCommand::MenuClick`]. Submenus/toggles are flattened in v1 (D2b); see `backend.rs`.
+    pub menu: Vec<MenuItem>,
 }
 
 /// A command the tray plugin issues; the host's SNI backend performs it on the item's D-Bus proxy.
@@ -42,4 +47,6 @@ pub struct TrayItem {
 pub enum TrayCommand {
     /// `org.kde.StatusNotifierItem.Activate(x, y)` on the item with this `key`.
     Activate { key: String },
+    /// `com.canonical.dbusmenu.Event(id, "clicked", …)` — a context-menu entry was clicked.
+    MenuClick { key: String, id: i32 },
 }
