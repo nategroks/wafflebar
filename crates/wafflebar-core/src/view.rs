@@ -14,6 +14,16 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ActionId(pub String);
 
+/// An entry in a [`View::Button`]'s right-click context menu. Order is preserved as given
+/// (e.g. desktop-file `Actions=` order — never re-sorted).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum MenuItem {
+    /// A clickable label routing `action` to the owning plugin.
+    Item { label: String, action: ActionId },
+    /// A horizontal separator.
+    Separator,
+}
+
 impl ActionId {
     pub fn new(id: impl Into<String>) -> Self {
         Self(id.into())
@@ -37,8 +47,15 @@ pub enum View {
     Row { children: Vec<View>, gap: u32, classes: Vec<String> },
     /// A vertical container.
     Col { children: Vec<View>, gap: u32, classes: Vec<String> },
-    /// A clickable wrapper; clicking it routes `action` to the owning module.
-    Button { child: Box<View>, action: ActionId, classes: Vec<String> },
+    /// A clickable wrapper; left-click routes `action` to the owning module. An optional
+    /// right-click context `menu` (empty = none) lets a plugin offer secondary actions
+    /// (e.g. the launcher's `Actions=`); each item routes its own `ActionId`.
+    Button {
+        child: Box<View>,
+        action: ActionId,
+        classes: Vec<String>,
+        menu: Vec<MenuItem>,
+    },
     /// Expanding empty space (pushes neighbours apart).
     Spacer,
     /// A trigger that reveals `content` in a popover. The affordance exists in the contract from
@@ -80,13 +97,22 @@ impl View {
         }
     }
 
-    /// Wrap `self` in a clickable button carrying `action`.
+    /// Wrap `self` in a clickable button carrying `action` (no context menu).
     pub fn button(self, action: impl Into<ActionId>) -> View {
         View::Button {
             child: Box::new(self),
             action: action.into(),
             classes: Vec::new(),
+            menu: Vec::new(),
         }
+    }
+
+    /// Attach a right-click context menu (no-op unless `self` is a `Button`).
+    pub fn with_menu(mut self, items: Vec<MenuItem>) -> View {
+        if let View::Button { menu, .. } = &mut self {
+            *menu = items;
+        }
+        self
     }
 
     /// Add a CSS class (no-op on variants without a class list, e.g. `Spacer`/`Empty`).
