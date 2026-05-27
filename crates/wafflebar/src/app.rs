@@ -141,6 +141,17 @@ fn present_bar(
     window.auto_exclusive_zone_enable();
     window.set_widget_name("wafflebar");
 
+    // Right-click empty bar space → preferences window (F3). Clicks on plugin buttons are consumed
+    // by their own handlers (launcher/tray menus); only unhandled right-clicks (fillers, gaps)
+    // bubble up to this window-level gesture. Needs a config file to edit; no-op on defaults.
+    if let Some(path) = config_path {
+        let gesture = gtk4::GestureClick::new();
+        gesture.set_button(gdk::BUTTON_SECONDARY);
+        let (app_c, path_c) = (app.clone(), path.to_path_buf());
+        gesture.connect_pressed(move |_, _, _, _| crate::prefs::open(&app_c, &path_c));
+        window.add_controller(gesture);
+    }
+
     let (host, timers, caps) =
         build_grid_and_host(&window, config, engine, &output_name, backend.clone());
     debug!(monitor = output_name, height = config.bar.height, "bar created");
