@@ -50,6 +50,11 @@ window#wafflebar {
 }
 .wb-menu-item:hover { background-color: #434c5e; }
 
+/* volume: icon + percent; scroll to change, click to mute */
+.volume { padding: 0 6px; }
+.volume .vol-icon { color: #88c0d0; }
+.volume .vol-label { color: #d8dee9; }
+
 /* show-desktop: a single toggle button; .active reflects the engaged state */
 .wb-showdesktop { padding: 0 4px; border-radius: 4px; }
 .wb-showdesktop:hover { background-color: #3b4252; }

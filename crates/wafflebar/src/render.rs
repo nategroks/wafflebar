@@ -14,7 +14,7 @@ use tracing::debug;
 use wafflebar_core::reconcile::child_key;
 use wafflebar_core::{
     diff_children, ActionId, ChildPatch, Event, Launch, ListPatch, MenuItem, Plugin, Reaction,
-    SeparatorStyle, Topic, View, WmCommand,
+    SeparatorStyle, Topic, View, VolumeCommand, WmCommand,
 };
 
 /// One placed module: its kind (for logging), the boxed reducer, and the host-owned container
@@ -35,6 +35,8 @@ pub struct Host {
     command_sink: Box<dyn Fn(&WmCommand)>,
     /// Where `Launch` intents go (wired to the shell executor: DBus activation or spawn).
     launch_sink: Box<dyn Fn(&Launch)>,
+    /// Where `VolumeCommand`s go (wired to the audio backend, or a no-op when none is running).
+    volume_sink: Box<dyn Fn(&VolumeCommand)>,
 }
 
 impl Host {
@@ -42,11 +44,13 @@ impl Host {
         slots: Vec<PluginSlot>,
         command_sink: Box<dyn Fn(&WmCommand)>,
         launch_sink: Box<dyn Fn(&Launch)>,
+        volume_sink: Box<dyn Fn(&VolumeCommand)>,
     ) -> Rc<Self> {
         Rc::new(Self {
             slots: RefCell::new(slots),
             command_sink,
             launch_sink,
+            volume_sink,
         })
     }
 
@@ -110,6 +114,9 @@ impl Host {
         }
         for intent in &reaction.launch {
             (self.launch_sink)(intent);
+        }
+        for cmd in &reaction.volume {
+            (self.volume_sink)(cmd);
         }
         if reaction.dirty {
             self.rerender(slot);
@@ -250,7 +257,7 @@ pub fn render_view(view: &View, slot: usize, host: &Rc<Host>) -> gtk4::Widget {
         View::Col { children, gap, classes } => {
             container(Orientation::Vertical, *gap, children, classes, slot, host)
         }
-        View::Button { child, action, classes, menu, key: _ } => {
+        View::Button { child, action, classes, menu, key: _, scroll_up, scroll_down } => {
             let b = gtk4::Box::new(Orientation::Horizontal, 0);
             b.append(&render_view(child, slot, host));
             add_classes(&b, classes);
@@ -272,6 +279,23 @@ pub fn render_view(view: &View, slot: usize, host: &Rc<Host>) -> gtk4::Widget {
                 right.set_button(gdk::BUTTON_SECONDARY);
                 right.connect_pressed(move |_, _, _, _| popover.popup());
                 b.add_controller(right);
+            }
+            // Scroll → up/down actions (volume wheel). dy<0 is scroll-up.
+            if scroll_up.is_some() || scroll_down.is_some() {
+                let scroll = gtk4::EventControllerScroll::new(
+                    gtk4::EventControllerScrollFlags::VERTICAL,
+                );
+                let host = host.clone();
+                let up = scroll_up.clone();
+                let down = scroll_down.clone();
+                scroll.connect_scroll(move |_, _dx, dy| {
+                    let action = if dy < 0.0 { up.as_ref() } else { down.as_ref() };
+                    if let Some(a) = action {
+                        host.dispatch_action(slot, a);
+                    }
+                    gtk4::glib::Propagation::Stop
+                });
+                b.add_controller(scroll);
             }
             b.upcast()
         }
@@ -373,7 +397,12 @@ mod tests {
     }
 
     fn host() -> Rc<Host> {
-        Host::new(Vec::new(), Box::new(|_: &WmCommand| {}), Box::new(|_: &Launch| {}))
+        Host::new(
+            Vec::new(),
+            Box::new(|_: &WmCommand| {}),
+            Box::new(|_: &Launch| {}),
+            Box::new(|_: &VolumeCommand| {}),
+        )
     }
 
     fn sep(style: SeparatorStyle, expand: bool) -> View {

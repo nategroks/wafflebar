@@ -10,6 +10,7 @@ pub mod launcher;
 pub mod separator;
 pub mod showdesktop;
 pub mod tasklist;
+pub mod volume;
 
 use wafflebar_core::{ActionId, Event, ModuleConfig, Plugin, Reaction, Topic, View};
 
@@ -36,6 +37,7 @@ pub fn build(kind: &str, output: &str, cfg: &ModuleConfig, caps: &Caps) -> Box<d
         "launcher" => Box::new(launcher::Launcher::new(cfg)),
         "separator" => Box::new(separator::Separator::new(cfg)),
         "showdesktop" => Box::new(showdesktop::ShowDesktop::new(caps)),
+        "volume" => Box::new(volume::Volume::new()),
         other => Box::new(Placeholder::new(other)),
     }
 }

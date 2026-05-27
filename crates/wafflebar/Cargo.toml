@@ -24,6 +24,10 @@ wayland-client = "0.31.14"
 wayland-scanner = "0.31.10"
 wayland-protocols-wlr = { version = "0.3.12", features = ["client"] }
 zbus = "5.15.0"
+# PulseAudio client API; works against pipewire-pulse on PipeWire systems. FFI to libpulse (already a system library).
+libpulse-binding = "2.30"
+# Integrates libpulse's mainloop API into GLib so subscription events wake our existing loop rather than a separate thread.
+libpulse-glib-binding = "2.29"
 # GTK + Wayland deps are added via `cargo add` (M1) so versions resolve compatibly.
 
 [dev-dependencies]
