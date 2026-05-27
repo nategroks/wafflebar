@@ -87,6 +87,10 @@ pub enum View {
         /// See `reconcile`. Plugins set this when the list is non-positional so reordering/removal
         /// reuses the right widgets instead of rebuilding siblings.
         key: Option<String>,
+        /// Actions dispatched on scroll up / down over the button (the volume plugin's ±5% wheel).
+        /// `None` → no scroll handling. Minimal first scroll affordance; not generalized.
+        scroll_up: Option<ActionId>,
+        scroll_down: Option<ActionId>,
     },
     /// Expanding empty space (pushes neighbours apart).
     Spacer,
@@ -141,7 +145,18 @@ impl View {
             classes: Vec::new(),
             menu: Vec::new(),
             key: None,
+            scroll_up: None,
+            scroll_down: None,
         }
+    }
+
+    /// Attach scroll-up / scroll-down actions (no-op unless `self` is a `Button`).
+    pub fn with_scroll(mut self, up: impl Into<ActionId>, down: impl Into<ActionId>) -> View {
+        if let View::Button { scroll_up, scroll_down, .. } = &mut self {
+            *scroll_up = Some(up.into());
+            *scroll_down = Some(down.into());
+        }
+        self
     }
 
     /// Set the reconciliation key (no-op unless `self` is a `Button`). Use for list elements whose
