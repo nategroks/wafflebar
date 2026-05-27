@@ -2,7 +2,7 @@
 //! drives the event loop (dwl backend fd + timers) on GLib's main loop.
 
 use std::cell::RefCell;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 use gtk4::gdk;
@@ -141,7 +141,8 @@ fn present_bar(
     window.auto_exclusive_zone_enable();
     window.set_widget_name("wafflebar");
 
-    let host = build_grid_and_host(&window, config, engine, &output_name, backend.clone());
+    let (host, timers, caps) =
+        build_grid_and_host(&window, config, engine, &output_name, backend.clone());
     debug!(monitor = output_name, height = config.bar.height, "bar created");
     window.present();
 
@@ -168,29 +169,74 @@ fn present_bar(
         });
     }
 
-    // One GLib timer per distinct subscribed interval; delivers a Tick to all modules.
-    for secs in host.timer_intervals() {
-        let host_t = host.clone();
-        glib::timeout_add_seconds_local(secs, move || {
-            host_t.deliver_event(&Event::Tick { secs });
-            glib::ControlFlow::Continue
-        });
-    }
+    // Timers (clock ticks + memory/CPU pollers) are owned and reconciled by `TimerSet`, set up
+    // inside `build_grid_and_host` and re-run on every structural reload — so there's no separate
+    // timer-start loop here anymore.
 
-    // Live config reload: re-apply option edits without a restart (F2).
+    // Live config reload (F2 + F2b). Option edits re-`configure()` the changed slots in place;
+    // structural edits (modules added/removed/reordered, a kind/cell/align change, or a [bar]/[grid]
+    // change) rebuild every plugin via `rebuild` below. The host persists across a structural
+    // rebuild, so its wiring (sinks, fd watch, backends holding `Weak<Host>`) stays valid.
     if let Some(path) = config_path {
-        crate::config_reload::watch_config(path.to_path_buf(), host.clone(), config.clone());
+        // Initial backend presence, captured now: a rebuild can't hot-start the audio/network/tray
+        // backends (they hang off the host's immutable sinks — that's F2c), so we warn instead when
+        // an edit adds the first consumer of one that never started.
+        let had_audio = host.subscribes(&Topic::Audio);
+        let had_network = host.subscribes(&Topic::Network);
+        let had_tray = host.subscribes(&Topic::Tray);
+
+        let rebuild: Rc<dyn Fn(&Config)> = {
+            let window = window.clone();
+            let output = output_name.clone();
+            let host = host.clone();
+            let timers = timers.clone();
+            Rc::new(move |new_config: &Config| {
+                let engine = match GridEngine::build(new_config) {
+                    Ok(e) => e,
+                    Err(e) => {
+                        warn!(error = %e, "structural reload: invalid layout; keeping current bar");
+                        return;
+                    }
+                };
+                // Structural changes rebuild every plugin (tear down all, reconstruct from the new
+                // config) rather than diffing — simple and correct, and structural edits are rare
+                // enough that the rebuild cost is irrelevant. See docs/UPSTREAM.md (F2b).
+                let (grid, slots) = populate_grid(new_config, &engine, &output, &caps);
+                host.replace_slots(slots); // tears down outgoing plugins (teardown hook)
+                window.set_child(Some(&grid)); // drops the old grid and its containers
+                timers.borrow_mut().reconcile(&host, memory_interval_secs(new_config));
+
+                // Backends are not reconciled in F2b (see TimerSet docs): warn when an edit adds the
+                // first consumer of one that isn't running. A removed consumer's backend just idles
+                // (single instance — wasteful, not a leak).
+                if host.subscribes(&Topic::Audio) && !had_audio {
+                    warn!("structural reload: added the first volume module — restart to connect the audio backend (F2c hot-starts backends)");
+                }
+                if host.subscribes(&Topic::Network) && !had_network {
+                    warn!("structural reload: added the first network module — restart to connect the network backend (F2c)");
+                }
+                if host.subscribes(&Topic::Tray) && !had_tray {
+                    warn!("structural reload: added the first tray module — restart to start the tray backend (F2c)");
+                }
+
+                host.render_all();
+                info!(modules = engine.placements.len(), "structural reload applied");
+            })
+        };
+        crate::config_reload::watch_config(path.to_path_buf(), host.clone(), rebuild, config.clone());
     }
 }
 
-/// Build the grid + module slots, attach to the window, and return the host that owns them.
-fn build_grid_and_host(
-    window: &ApplicationWindow,
+/// Build the grid widget and one host-owned container per placement, instantiating each module's
+/// reducer. Shared by initial bring-up and structural reload (F2b) so both paths produce an
+/// identical layout. Pure widget/plugin construction — no backend or timer wiring (the caller owns
+/// that), which is what lets the rebuild path reuse it.
+fn populate_grid(
     config: &Config,
     engine: &GridEngine,
     output: &str,
-    backend: Option<Rc<RefCell<DwlBackend>>>,
-) -> Rc<Host> {
+    caps: &plugins::Caps,
+) -> (Grid, Vec<PluginSlot>) {
     let grid = Grid::builder()
         .hexpand(true)
         .column_homogeneous(true)
@@ -213,21 +259,11 @@ fn build_grid_and_host(
         }
     }
 
-    // Backend capabilities (queried once) handed to every plugin at construction.
-    // Queried once at backend init. If a future backend has dynamic capabilities, lift this to a
-    // WmEvent::CapsChanged.
-    let caps = plugins::Caps {
-        show_desktop: backend
-            .as_ref()
-            .map(|b| b.borrow().supports_show_desktop())
-            .unwrap_or(false),
-    };
-
     // One host-owned container per placement; the module's View is rendered into it.
     let mut slots = Vec::with_capacity(engine.placements.len());
     for placement in &engine.placements {
         let mcfg = &config.modules[placement.index];
-        let module = plugins::build(&placement.kind, output, mcfg, &caps);
+        let module = plugins::build(&placement.kind, output, mcfg, caps);
         let container = gtk4::Box::new(Orientation::Horizontal, 0);
         container.set_hexpand(true);
         apply_align(&container, placement.align);
@@ -246,6 +282,29 @@ fn build_grid_and_host(
         });
     }
 
+    (grid, slots)
+}
+
+/// Build the grid + module slots, attach to the window, wire backends, and return the host that
+/// owns them along with the reconciled [`TimerSet`] and queried [`plugins::Caps`] (both reused by
+/// the structural-reload path).
+fn build_grid_and_host(
+    window: &ApplicationWindow,
+    config: &Config,
+    engine: &GridEngine,
+    output: &str,
+    backend: Option<Rc<RefCell<DwlBackend>>>,
+) -> (Rc<Host>, Rc<RefCell<TimerSet>>, plugins::Caps) {
+    // Backend capabilities, queried once at init and handed to every plugin at construction. If a
+    // future backend gains dynamic capabilities, lift this to a WmEvent::CapsChanged.
+    let caps = plugins::Caps {
+        show_desktop: backend
+            .as_ref()
+            .map(|b| b.borrow().supports_show_desktop())
+            .unwrap_or(false),
+    };
+
+    let (grid, slots) = populate_grid(config, engine, output, &caps);
     window.set_child(Some(&grid));
 
     // Commands flow to the active backend's execute (no-op without a backend).
@@ -262,8 +321,6 @@ fn build_grid_and_host(
     let subscribes = |topic: &Topic| slots.iter().any(|s| s.module.subscribe().contains(topic));
     let needs_audio = subscribes(&Topic::Audio);
     let needs_network = subscribes(&Topic::Network);
-    let needs_memory = subscribes(&Topic::Memory);
-    let needs_cpu = subscribes(&Topic::Cpu);
     let needs_tray = subscribes(&Topic::Tray);
     let audio = if needs_audio {
         PulseBackend::new().map(|b| Rc::new(RefCell::new(b)))
@@ -335,38 +392,139 @@ fn build_grid_and_host(
         }));
     }
 
-    // Memory backend: polls /proc/meminfo on a GLib timer at the configured interval (5s default).
-    // The SourceId is dropped but the source persists (it owns the closure), like the fd watch.
-    if needs_memory {
-        let secs = config
-            .modules
-            .iter()
-            .find(|m| m.kind == "memory")
-            .and_then(|m| m.opt_i64("interval"))
-            .filter(|n| *n > 0)
-            .map(|n| n as u64)
-            .unwrap_or(5);
-        let host_weak = Rc::downgrade(&host);
-        let _mem_source = ProcMemBackend.start(
-            std::time::Duration::from_secs(secs),
-            Box::new(move |state| {
-                if let Some(h) = host_weak.upgrade() {
-                    h.deliver_event(&Event::Memory(state));
-                }
-            }),
-        );
+    // Clock-tick + memory/CPU-poll timers are owned by the TimerSet and (re)created by reconcile,
+    // which both this initial build and every structural reload call — so there's exactly one
+    // start path and reload can't double-register a timer.
+    let timers = Rc::new(RefCell::new(TimerSet::default()));
+    timers.borrow_mut().reconcile(&host, memory_interval_secs(config));
+
+    (host, timers, caps)
+}
+
+/// The memory module's configured poll interval in seconds (default 5). Read from config because
+/// the memory poller's GLib timer is created with a fixed period.
+fn memory_interval_secs(config: &Config) -> u64 {
+    config
+        .modules
+        .iter()
+        .find(|m| m.kind == "memory")
+        .and_then(|m| m.opt_i64("interval"))
+        .filter(|n| *n > 0)
+        .map(|n| n as u64)
+        .unwrap_or(5)
+}
+
+/// App-level ownership of the GLib timer `SourceId`s whose existence tracks which plugins are
+/// present: the clock-tick intervals and the memory/CPU pollers. Reconciled on every structural
+/// rebuild so add/remove/reorder/kind-change never leaves a stale timer running or double-registers
+/// one. Timers are the *only* resource class that would leak on every rebuild if ignored — a
+/// blindly re-added timer stacks — whereas backends, held as single instances by the host's sinks,
+/// leak only if recreated, which F2b never does (backend reconciliation is F2c). See
+/// docs/UPSTREAM.md (F2b).
+#[derive(Default)]
+struct TimerSet {
+    /// `Topic::Timer` intervals (seconds) → the source driving a `Tick` at that period.
+    clock: HashMap<u32, glib::SourceId>,
+    /// /proc/meminfo poller, present iff some module subscribes `Topic::Memory`.
+    memory: Option<glib::SourceId>,
+    /// /proc/stat poller, present iff some module subscribes `Topic::Cpu`.
+    cpu: Option<glib::SourceId>,
+}
+
+impl TimerSet {
+    /// Diff the live timers against what the host's *current* slots need: remove what's gone, start
+    /// what's new, keep the intersection. Idempotent (calling it unchanged is a no-op). Every timer
+    /// closure captures `Weak<Host>`, never `Rc<Host>`: a timer must not pin the host alive, and a
+    /// tick that fires after the slot is gone resolves to a dropped upgrade. See docs/UPSTREAM.md
+    /// (timer closures owned alongside the host capture Weak).
+    ///
+    /// Note: when memory/CPU stay present across a rebuild the existing poller is kept as-is, so a
+    /// changed `interval` only takes effect on restart — F2b reconciles timer *existence*, not
+    /// period.
+    fn reconcile(&mut self, host: &Rc<Host>, mem_secs: u64) {
+        let intervals: HashSet<u32> = host.timer_intervals().into_iter().collect();
+        let want_memory = host.subscribes(&Topic::Memory);
+        let want_cpu = host.subscribes(&Topic::Cpu);
+        self.reconcile_to(&intervals, want_memory, want_cpu, host, mem_secs);
     }
 
-    // CPU backend: polls /proc/stat at 1 Hz, tracking per-tick deltas (first tick is silent).
-    if needs_cpu {
-        let host_weak = Rc::downgrade(&host);
-        let _cpu_source = ProcStatBackend.start(Box::new(move |state| {
-            if let Some(h) = host_weak.upgrade() {
-                h.deliver_event(&Event::Cpu(state));
+    /// The pure diff, split out so the leak-prone bookkeeping is testable without building real
+    /// plugin slots (which would need a second GTK-init thread — forbidden, see the tests). `host`
+    /// is used only to `downgrade` into the timer closures; the desired set comes from the args.
+    fn reconcile_to(
+        &mut self,
+        intervals: &HashSet<u32>,
+        want_memory: bool,
+        want_cpu: bool,
+        host: &Rc<Host>,
+        mem_secs: u64,
+    ) {
+        // Clock intervals.
+        let needed = intervals;
+        let gone: Vec<u32> = self
+            .clock
+            .keys()
+            .copied()
+            .filter(|s| !needed.contains(s))
+            .collect();
+        for secs in gone {
+            if let Some(id) = self.clock.remove(&secs) {
+                id.remove();
             }
-        }));
+        }
+        for &secs in needed {
+            if self.clock.contains_key(&secs) {
+                continue;
+            }
+            let host_weak = Rc::downgrade(host);
+            let id = glib::timeout_add_seconds_local(secs, move || {
+                if let Some(h) = host_weak.upgrade() {
+                    h.deliver_event(&Event::Tick { secs });
+                }
+                glib::ControlFlow::Continue
+            });
+            self.clock.insert(secs, id);
+        }
+
+        // Memory poller: /proc/meminfo on a GLib timer at the configured interval.
+        match (want_memory, self.memory.is_some()) {
+            (true, false) => {
+                let host_weak = Rc::downgrade(host);
+                self.memory = Some(ProcMemBackend.start(
+                    std::time::Duration::from_secs(mem_secs),
+                    Box::new(move |state| {
+                        if let Some(h) = host_weak.upgrade() {
+                            h.deliver_event(&Event::Memory(state));
+                        }
+                    }),
+                ));
+            }
+            (false, true) => {
+                if let Some(id) = self.memory.take() {
+                    id.remove();
+                }
+            }
+            _ => {}
+        }
+
+        // CPU poller: /proc/stat at 1 Hz, tracking per-tick deltas (first tick is silent).
+        match (want_cpu, self.cpu.is_some()) {
+            (true, false) => {
+                let host_weak = Rc::downgrade(host);
+                self.cpu = Some(ProcStatBackend.start(Box::new(move |state| {
+                    if let Some(h) = host_weak.upgrade() {
+                        h.deliver_event(&Event::Cpu(state));
+                    }
+                })));
+            }
+            (false, true) => {
+                if let Some(id) = self.cpu.take() {
+                    id.remove();
+                }
+            }
+            _ => {}
+        }
     }
-    host
 }
 
 fn apply_align(widget: &impl IsA<gtk4::Widget>, align: Align) {
@@ -398,4 +556,89 @@ fn load_css(display: &gdk::Display, theme: Option<&str>) {
         &provider,
         gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use wafflebar_core::{Launch, Position, TrayCommand, VolumeCommand, WmCommand};
+
+    /// A slot-less host: building real `PluginSlot`s would need `gtk4::Box`es, and creating GTK
+    /// widgets here would init GTK on this test's thread — but libtest gives each test its own
+    /// thread and `renderer_gtk_behaviors` already owns the one GTK-init thread (a second panics:
+    /// "Attempted to initialize GTK from two different threads"). So this test stays GTK-free and
+    /// drives `reconcile_to` directly. The empty host exists only to `downgrade` into the timer
+    /// closures; building GLib timers needs a main context, not a GTK display.
+    fn empty_host() -> Rc<Host> {
+        Host::new(
+            Vec::new(),
+            Box::new(|_: &WmCommand| {}),
+            Box::new(|_: &Launch| {}),
+            Box::new(|_: &VolumeCommand| {}),
+            Box::new(|_: &TrayCommand| {}),
+            Position::Top,
+        )
+    }
+
+    fn intervals(secs: &[u32]) -> HashSet<u32> {
+        secs.iter().copied().collect()
+    }
+
+    /// Timers are the only resource class that leaks on *every* structural rebuild if
+    /// reconciliation is wrong (a blindly re-added timer stacks; backends, held as single instances,
+    /// leak only if recreated, which F2b never does). So the timer diff gets the stress coverage,
+    /// walking each structural edit type as a change in the desired set.
+    #[test]
+    fn timer_reconciliation() {
+        let host = empty_host();
+        let mut t = TimerSet::default();
+        let none = intervals(&[]);
+        let one = intervals(&[1]);
+
+        // Empty bar → no timers.
+        t.reconcile_to(&none, false, false, &host, 5);
+        assert!(t.clock.is_empty() && t.memory.is_none() && t.cpu.is_none());
+
+        // Add a memory module → its poller starts; clock/cpu still absent.
+        t.reconcile_to(&none, true, false, &host, 5);
+        assert!(t.memory.is_some(), "memory poller started on add");
+        assert!(t.clock.is_empty() && t.cpu.is_none());
+
+        // Remove it → poller torn down (SourceId removed, Option cleared).
+        t.reconcile_to(&none, false, false, &host, 5);
+        assert!(t.memory.is_none(), "memory poller removed on remove");
+
+        // Add a clock → one interval-keyed tick timer.
+        t.reconcile_to(&one, false, false, &host, 5);
+        assert_eq!(t.clock.len(), 1, "one clock interval timer");
+
+        // Change kind clock→cpu (slot's needs flip) → clock timer gone, cpu poller up.
+        t.reconcile_to(&none, false, true, &host, 5);
+        assert!(t.clock.is_empty(), "clock timer removed on kind change");
+        assert!(t.cpu.is_some(), "cpu poller started on kind change");
+
+        // Reorder doesn't change the desired set: reconcile is idempotent, all timers stay up with
+        // no duplication.
+        t.reconcile_to(&one, true, true, &host, 5);
+        t.reconcile_to(&one, true, true, &host, 5); // reorder → identical needs
+        assert_eq!(t.clock.len(), 1);
+        assert!(t.memory.is_some() && t.cpu.is_some(), "all timers up, none duplicated");
+
+        // Distinct intervals each get a timer; re-reconciling the same set adds nothing.
+        let ten = intervals(&[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+        t.reconcile_to(&ten, true, true, &host, 5);
+        assert_eq!(t.clock.len(), 10);
+        t.reconcile_to(&ten, true, true, &host, 5);
+        assert_eq!(t.clock.len(), 10, "idempotent: no duplicate interval timers");
+
+        // Leak stress: 10 add-all / remove-all cycles must return to the same resting state every
+        // time, never accumulating sources.
+        for _ in 0..10 {
+            t.reconcile_to(&one, true, true, &host, 5);
+            assert_eq!(t.clock.len(), 1);
+            assert!(t.memory.is_some() && t.cpu.is_some());
+            t.reconcile_to(&none, false, false, &host, 5);
+            assert!(t.clock.is_empty() && t.memory.is_none() && t.cpu.is_none());
+        }
+    }
 }
