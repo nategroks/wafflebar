@@ -10,7 +10,8 @@ pub mod backend;
 
 use wafflebar_core::{ActionId, Event, Plugin, Reaction, Topic, TrayCommand, TrayItem, View};
 
-const ACTION_PREFIX: &str = "activate:";
+const ACTION_ACTIVATE: &str = "activate:";
+const ACTION_MENU: &str = "menu:"; // "menu:<key>:<dbusmenu-id>"
 
 pub struct StatusTray {
     /// The visible items, in registration order. Compared as a whole for the dirty check.
@@ -48,9 +49,11 @@ impl Plugin for StatusTray {
             .map(|item| {
                 // Icon by themed name; placeholder when absent (pixmap icons are D2c).
                 let icon = item.icon_name.as_deref().unwrap_or("application-x-executable");
+                // Left-click → Activate; right-click → the DBusMenu context menu (B2b Button.menu).
                 View::icon(icon, 16)
                     .with_class("tray-icon")
-                    .button(ActionId::new(format!("{ACTION_PREFIX}{}", item.key)))
+                    .button(ActionId::new(format!("{ACTION_ACTIVATE}{}", item.key)))
+                    .with_menu(item.menu.clone())
                     .with_key(format!("tray:{}", item.key)) // stable identity for the keyed diff
                     .with_class("tray-item")
             })
@@ -73,8 +76,16 @@ impl Plugin for StatusTray {
     }
 
     fn on_action(&mut self, action: &ActionId) -> Reaction {
-        if let Some(key) = action.0.strip_prefix(ACTION_PREFIX) {
+        if let Some(key) = action.0.strip_prefix(ACTION_ACTIVATE) {
             return Reaction::tray(TrayCommand::Activate { key: key.to_string() });
+        }
+        if let Some(rest) = action.0.strip_prefix(ACTION_MENU) {
+            // "<key>:<id>" — the key may contain ':'/'/', so the id is after the *last* ':'.
+            if let Some((key, id)) = rest.rsplit_once(':') {
+                if let Ok(id) = id.parse::<i32>() {
+                    return Reaction::tray(TrayCommand::MenuClick { key: key.to_string(), id });
+                }
+            }
         }
         Reaction::none()
     }
@@ -92,6 +103,7 @@ mod tests {
             title: key.into(),
             icon_name: icon.map(str::to_string),
             status,
+            menu: Vec::new(),
         }
     }
 
@@ -171,5 +183,35 @@ mod tests {
             vec![TrayCommand::Activate { key: "org.x.Item/StatusNotifierItem".into() }]
         );
         assert!(t.on_action(&ActionId::new("bogus")).tray.is_empty());
+    }
+
+    #[test]
+    fn menu_click_parses_key_and_id() {
+        let mut t = StatusTray::new();
+        // The key contains ':' and '/'; the id is the integer after the *last* ':'.
+        assert_eq!(
+            t.on_action(&ActionId::new("menu:org.x:1/StatusNotifierItem:42")).tray,
+            vec![TrayCommand::MenuClick { key: "org.x:1/StatusNotifierItem".into(), id: 42 }]
+        );
+        assert!(t.on_action(&ActionId::new("menu:no-id")).tray.is_empty());
+    }
+
+    #[test]
+    fn item_menu_is_rendered_on_the_button() {
+        use wafflebar_core::view::MenuItem;
+        let mut t = StatusTray::new();
+        let mut it = item("a", Some("x"), TrayStatus::Active);
+        it.menu = vec![MenuItem::Item {
+            label: "Quit".into(),
+            action: ActionId::new("menu:a:7"),
+        }];
+        t.on_event(&Event::Tray(vec![it]));
+        let View::Row { children, .. } = t.view() else { panic!("row") };
+        match &children[0] {
+            View::Button { menu, .. } => {
+                assert_eq!(menu.len(), 1, "DBusMenu item rendered on the button's right-click menu");
+            }
+            _ => panic!("button"),
+        }
     }
 }
