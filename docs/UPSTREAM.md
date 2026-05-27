@@ -147,6 +147,38 @@ click/menu/key, so a new scroll consumer needs no new dispatch path and composes
 `Button` already does. Direction is GTK4-normalized (device + natural-scroll applied); v1 always
 consumes — `TODO(scroll)` a `handled` flag when nested scrollables ship.
 
+## Resource lifecycle & structural reload (F2b)
+Plugins are pure reducers and own **no** live resources — the GTK-free / serializable invariant (for
+v1→v2 process isolation) forbids a plugin from holding a libpulse context, a zbus proxy, or a GLib
+`SourceId`. So `Plugin::teardown` is, and should stay, a no-op hook on every v1 plugin; the real
+cleanup lives **app-level, keyed by topic/backend**, not per-plugin. A structural config reload keeps
+the *same* `Host` (its sinks, fd-watch, and backends holding `Weak<Host>` all stay valid) and replaces
+only the slot vector + grid.
+
+The load-bearing distinction for what a rebuild must clean up: **timers leak on *every* rebuild if
+ignored** (a blindly re-added interval/poller stacks a second source), whereas **backends leak only if
+*recreated*** (they're single instances held by the host's immutable sinks; leaving them alone is
+safe, just possibly idle). That split is why F2b reconciles timers (the `TimerSet`: clock intervals +
+memory/CPU pollers, diffed remove-then-add so re-adds can't stack) but defers backend
+start/stop — which needs rewireable sinks — to F2c. Adding the first consumer of an unstarted backend
+warns rather than connecting; removing the last leaves it idling.
+
+**Timer-closure ownership rule:** a timer whose lifetime is managed alongside the host must capture
+`Weak<Host>`, never `Rc<Host>` — otherwise the host→…→timer→host cycle pins the host forever and a tick
+firing after teardown would act on a stale slot. Memory/CPU established this; clock joined them in F2b
+(it previously captured a strong clone because its `SourceId` was leaked, not owned). (Note: F2b
+reconciles timer *existence*, not period — a changed memory `interval` still needs a restart, since the
+poller's GLib timer is created with a fixed period.)
+
+## Design-note discipline
+A design note that reaches a finding **contradicting its own framing** is the phase working as
+intended, not a detour. The point of reading upstream / the existing code before committing to a design
+is to surface the inverse-direction question — "what does the code actually do?" vs. "what does the
+conventional shape assume?" F2b's note set out to add `Plugin::teardown`-as-cleanup-mechanism (the
+conventional shape: plugins own their backends) and the read proved the opposite (the invariant forbids
+it; resources are host-level). Default to *read first, then propose findings that contradict the
+framing when the code supports them* — not *read the framing, then validate it*.
+
 ## Roadmap (phases, each tied to a real directory)
 - **A** finish M2 — `tasklist` (this PR).
 - **B** plugin framework — `Plugin::configure` (per-instance TOML + `notify` live-reload), `launcher`, `separator`/`showdesktop`.
