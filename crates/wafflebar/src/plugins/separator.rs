@@ -5,7 +5,9 @@
 //! Deliberately tiny: a separator is pure presentation, so this reducer is stateless and emits the
 //! same `View` forever. The `expand` flag is what lets `[left] | spacer | [right]` layouts work.
 
-use wafflebar_core::{ActionId, Event, ModuleConfig, Plugin, Reaction, SeparatorStyle, Topic, View};
+use wafflebar_core::{
+    ActionId, ConfigField, Event, ModuleConfig, Plugin, Reaction, SeparatorStyle, Topic, View,
+};
 
 pub struct Separator {
     style: SeparatorStyle,
@@ -42,6 +44,23 @@ impl Plugin for Separator {
     fn configure(&mut self, cfg: &ModuleConfig) -> Reaction {
         *self = Self::new(cfg); // config-only: reconstruct
         Reaction::dirty()
+    }
+
+    fn config_schema(&self) -> Vec<ConfigField> {
+        vec![
+            ConfigField::choice(
+                "style",
+                "Style",
+                &[
+                    ("transparent", "Transparent"),
+                    ("line", "Line"),
+                    ("handle", "Handle"),
+                    ("dots", "Dots"),
+                ],
+                "line",
+            ),
+            ConfigField::bool("expand", "Expand to fill", false),
+        ]
     }
 }
 

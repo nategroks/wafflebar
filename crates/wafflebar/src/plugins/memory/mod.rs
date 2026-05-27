@@ -7,7 +7,7 @@
 
 pub mod backend;
 
-use wafflebar_core::{ActionId, Event, MemoryState, Plugin, Reaction, Topic, View};
+use wafflebar_core::{ActionId, ConfigField, Event, MemoryState, Plugin, Reaction, Topic, View};
 
 pub struct Memory {
     display: Option<Display>,
@@ -103,6 +103,12 @@ impl Plugin for Memory {
     fn on_action(&mut self, _action: &ActionId) -> Reaction {
         // v1 has no interaction (no click target). TODO(memory): click → a system monitor.
         Reaction::none()
+    }
+
+    fn config_schema(&self) -> Vec<ConfigField> {
+        // The poll period is owned by the backend timer (app.rs), so an interval edit only takes
+        // effect on restart — the F2b "reconcile timer existence, not period" limitation.
+        vec![ConfigField::int("interval", "Poll interval (seconds)", 1, 60, 5)]
     }
 }
 

@@ -15,7 +15,8 @@
 //! - show-only-minimized — `set_show_only_minimized`
 
 use wafflebar_core::{
-    ActionId, Event, ModuleConfig, Plugin, Reaction, Topic, View, Window, WmCommand, WmEvent,
+    ActionId, ConfigField, Event, ModuleConfig, Plugin, Reaction, Topic, View, Window, WmCommand,
+    WmEvent,
 };
 
 const FALLBACK_ICON: &str = "application-x-executable";
@@ -127,6 +128,10 @@ impl Plugin for Tasklist {
         // Re-read the option; `output` and the live window list are preserved.
         self.max_chars = read_max_chars(cfg);
         Reaction::dirty()
+    }
+
+    fn config_schema(&self) -> Vec<ConfigField> {
+        vec![ConfigField::int("max_chars", "Max characters per title (0 = unlimited)", 0, 200, 0)]
     }
 }
 

@@ -4,7 +4,7 @@
 //! trivial on the trait. It is — `view()` is one `View::label(formatted_time)`.
 
 use chrono::Local;
-use wafflebar_core::{ActionId, Event, Plugin, ModuleConfig, Reaction, Topic, View};
+use wafflebar_core::{ActionId, ConfigField, Event, Plugin, ModuleConfig, Reaction, Topic, View};
 
 const DEFAULT_FORMAT: &str = "%a %d %b   %H:%M";
 
@@ -50,6 +50,10 @@ impl Plugin for Clock {
         // Config-only plugin: reconstruct from the new config (dedupes new()/configure()).
         *self = Self::new(cfg);
         Reaction::dirty()
+    }
+
+    fn config_schema(&self) -> Vec<ConfigField> {
+        vec![ConfigField::text("format", "Time format (strftime)", DEFAULT_FORMAT)]
     }
 }
 
