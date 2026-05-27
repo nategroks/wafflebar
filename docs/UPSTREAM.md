@@ -144,6 +144,28 @@ double-apply. The bar config (`[bar]`) is described by a host-owned schema (not 
 through the same pipeline; its edits persist but apply on restart (anchors/zone/CSS are fixed at
 window creation), surfaced by an honest footer rather than a hidden half-working path.
 
+## Add Items & application discovery (F4)
+**Plugin metadata is a static binary registry, not a trait method.** `plugins::catalog()` lists the
+addable kinds (`PluginInfo { kind, name, description, icon, unique }`). The binary knows its
+compiled-in plugin set at build time — plugins describe what they *are* statically; instances are
+dynamic. Metadata is binary-time, not runtime, so it stays out of the `Plugin` trait (which describes
+a live instance). `unique` is a coarse global flag, set only for `statustray` (a second instance fails
+to acquire the SNI Watcher name and renders empty — a silent failure we prevent by disabling the Add
+entry). Per-output plugins (tags/window/showdesktop) legitimately allow multiple instances; a
+`Uniqueness::PerOutput` scope is a TODO if same-output duplicates prove confusing.
+
+**`.desktop` discovery is F4-owned; E reuses the data layer and adds categorization.**
+`core::freedesktop::list_applications()` enumerates `$XDG_DATA_DIRS/applications`, dedupes by id (first
+dir wins, per spec), and excludes `NoDisplay` (the launcher resolver *keeps* `NoDisplay` for explicit
+references — enumeration and explicit-resolution differ here). E's applications menu builds the
+Menu-Spec category tree *on top of* the same enumeration: F4 = list/search, E = categorize. Don't
+reinvent the walk in E.
+
+**`FieldKind::default` now has three load-bearing uses** — form population (F3), Add-Items seeding of a
+new module's options (F4), and a future reset-to-default affordance (F5+). It's static schema data
+(what the field shows when the key is absent), not a current-value snapshot, so it doesn't reintroduce
+the two-sources problem. Don't remove or repurpose it casually.
+
 ## Defer optimizations until the architecture demonstrably fails
 Optimizations are deferred until the architecture demonstrably fails to prevent the load case they
 target. The reducer-diff-keyed pipeline prevents most redundant work *by construction* (value-compare
