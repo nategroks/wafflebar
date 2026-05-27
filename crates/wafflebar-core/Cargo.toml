@@ -12,3 +12,8 @@ serde.workspace = true
 toml.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
+# Desktop entry parsing per fd.o spec. NOTE: its Exec field-code expansion is buggy (%i emits
+# one arg, not --icon <val>; naive whitespace tokenizer) and its locale env helper is non-spec
+# (LANG only, no LC_MESSAGES, no fallback chain) — so field-code expansion is hand-rolled in
+# core::freedesktop::exec and the locale chain in core::freedesktop::locale.
+freedesktop-desktop-entry = "~0.8.1"
