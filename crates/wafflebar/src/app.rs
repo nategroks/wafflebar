@@ -15,6 +15,7 @@ use wafflebar_core::{
     Align, Config, Event, GridEngine, Launch, Position, WindowManager, WmCommand,
 };
 
+use crate::event_loop;
 use crate::plugins;
 use crate::render::{Host, PluginSlot};
 use crate::wm::DwlBackend;
@@ -139,14 +140,14 @@ fn present_bar(
         for ev in b.borrow().snapshot() {
             host.deliver_event(&Event::Wm(ev));
         }
-        // v1 SHORTCUT: poll the backend at 20 Hz. glib 0.22 exposes no safe unix-fd watch
-        // (`unix_fd_add_local`/`IOChannel` were dropped), so we can't wake on fd-readable here.
-        // `dispatch()` is a cheap non-blocking drain (prepare_read + dispatch_pending), so idle
-        // CPU stays ~0%. TODO: replace with true fd-readable integration via calloop or the
-        // g_unix_fd_add ffi once we want sub-frame latency. `DwlBackend::fd()` is ready for it.
+        // Wake on the wl_display fd becoming readable (G_IO_IN) rather than polling: a truly idle
+        // bar makes zero syscalls. `dispatch()` runs the unchanged read-guard dance. The source
+        // lives for the process lifetime (like the timer it replaced); we keep the SourceId so a
+        // future clean-shutdown path can `remove()` it before the wl_display is dropped.
+        let fd = b.borrow().fd();
         let host_p = host.clone();
         let b_p = b.clone();
-        glib::timeout_add_local(std::time::Duration::from_millis(50), move || {
+        let _fd_source = event_loop::add_fd_watch_local(fd, move || {
             for ev in b_p.borrow_mut().dispatch() {
                 host_p.deliver_event(&Event::Wm(ev));
             }

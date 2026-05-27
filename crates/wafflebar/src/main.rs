@@ -5,6 +5,7 @@
 //! which owns all GTK/layer-shell concerns.
 
 mod app;
+mod event_loop;
 mod plugins;
 mod render;
 mod shell;
