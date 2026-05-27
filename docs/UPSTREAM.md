@@ -105,6 +105,20 @@ binary (v1→v2 isolation, for the server this time). One owner per session: acq
 `DoNotQueue` so contention is immediate, log-and-disable if another daemon (mako/dunst) holds it, and
 offer `--replace-notifications` (`ReplaceExisting | AllowReplacement`) to take over deliberately.
 
+**Notification popups (G1b) are a host-managed widget stack, not a reducer `View`.** Like the menu and
+prefs, notifications are host-rendered from GTK-free data — but unlike a plugin's `View` (which the
+keyed-diff reconciles), the popup stack manages GTK widgets directly in a `HashMap<id, widget>` keyed
+by notification id. `replaces_id` rebuilds the existing row's children in place (same widget → same
+stack position, no flicker); the keyed-diff is for *reducer-described* content and doesn't apply here.
+Per-id expiry timers live in a `HashMap<id, SourceId>` — the `TimerSet` discipline (F2b) reused:
+critical urgency / `Never` schedule no timer; a fired timer or a dismiss emits `NotificationClosed`,
+an action emits `ActionInvoked` then closes (the popup→server reverse of the G1a channel, via the
+`NotifyServer`'s stored connection). A visible cap (5; critical may exceed to a hard max) with a FIFO
+overflow queue — never drop, only on close/expiry. Image resolution priority: `image-path` hint →
+`app_icon` (icon name or absolute path) → generic fallback. The raw `image-data` hint is deferred (a
+TODO) — and note it's **RGBA, not the SNI ARGB32**, so it would *not* reuse `argb_to_rgba` when it
+lands (the design-note assumption was off there).
+
 ## Finish what's nearly done before opening new surface
 At a milestone boundary, prefer finishing a nearly-done feature over starting a new one. An 80%-done
 feature is a *quality* problem (works for the common case, breaks on edges — users experience it as
