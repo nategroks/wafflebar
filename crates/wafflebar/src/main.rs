@@ -9,6 +9,7 @@ mod config_reload;
 mod event_loop;
 mod menu;
 mod notify;
+mod notify_ui;
 mod plugins;
 mod prefs;
 mod render;

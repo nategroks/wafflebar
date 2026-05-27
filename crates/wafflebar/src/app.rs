@@ -44,13 +44,17 @@ pub fn build_bars(
     };
     load_css(&display, config.bar.theme.as_deref());
 
-    // Notification server (G1a) — session-wide, started once per process (not per monitor). G1a
-    // logs received notifications; G1b renders them as popups.
-    crate::notify::start(replace_notifications, |op| match op {
+    // Notifications (G) — session-wide, started once per process (not per monitor). The server owns
+    // org.freedesktop.Notifications; the stack renders incoming notifications as top-right popups.
+    let notify_server = crate::notify::NotifyServer::new();
+    let notify_stack = crate::notify_ui::NotificationStack::new(app, notify_server.clone());
+    notify_server.start(replace_notifications, move |op| match op {
         crate::notify::ServerOp::Post(n) => {
-            info!(id = n.id, app = %n.app_name, summary = %n.summary, "notification received")
+            crate::notify_ui::NotificationStack::post(&notify_stack, n)
         }
-        crate::notify::ServerOp::Close(id) => info!(id, "notification close requested"),
+        crate::notify::ServerOp::Close(id) => {
+            crate::notify_ui::NotificationStack::close_external(&notify_stack, id)
+        }
     });
 
     // One Wayland backend connection, shared across bars. None on non-dwl sessions (the bar
