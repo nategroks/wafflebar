@@ -4,6 +4,14 @@
 //! `WmCommand` sink. Plugins emit pure-data `Launch` intents; the executor turns them into DBus
 //! activations or spawned processes. Keeping it behind the [`DbusActivator`]/[`Spawner`] traits
 //! lets the failure modes (activation timeout, spawn failure) be tested with fakes, no live bus.
+//!
+//! **PROVISIONAL (per-launch worker thread):** [`ZbusActivator`] runs each blocking `zbus` call on
+//! a throwaway `std::thread` so the GLib loop stays responsive while the activation is bounded by
+//! [`DBUS_ACTIVATE_TIMEOUT`]. Fine for the launcher (clicks are rare, one bus call each), but it
+//! does *not* scale: the next blocking-DBus consumer — almost certainly statustray's SNI icon
+//! pixmap fetches (Phase D) — is high-frequency, and spawning a thread per call there is wrong.
+//! When that second consumer lands, consolidate to a single executor task pool (one long-lived
+//! connection + a work queue). Do **not** generalize this prematurely; revisit at statustray.
 
 use std::collections::HashMap;
 use std::time::Duration;

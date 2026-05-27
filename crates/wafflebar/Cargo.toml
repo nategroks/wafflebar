@@ -27,6 +27,6 @@ zbus = "5.15.0"
 # GTK + Wayland deps are added via `cargo add` (M1) so versions resolve compatibly.
 
 [dev-dependencies]
-# Test-only: build a `ModuleConfig` (whose `options` map is `toml::Value`) in launcher tests.
+# Used to construct ModuleConfig.options in tests; runtime config loading lives in core::config.
 # Reuses the workspace `toml` already pulled in by wafflebar-core; no new external dep.
 toml.workspace = true
