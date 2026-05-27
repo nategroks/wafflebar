@@ -7,6 +7,7 @@
 //! serializable and makes the eventual external-process step a transport wrapper, not a rewrite.
 
 use crate::audio::{VolumeCommand, VolumeEvent};
+use crate::config::ModuleConfig;
 use crate::cpu::CpuState;
 use crate::freedesktop::Launch;
 use crate::memory::MemoryState;
@@ -142,6 +143,13 @@ pub trait Plugin {
     fn on_event(&mut self, ev: &Event) -> Reaction;
     /// React to a user action routed back by [`ActionId`].
     fn on_action(&mut self, action: &ActionId) -> Reaction;
+    /// Re-read this module's config after a live edit (the host calls this only when the module's
+    /// own config section changed). Re-derive internal state and return a [`Reaction`] (`dirty` to
+    /// re-render). Default: no-op — for modules with no configurable options. Placement params
+    /// (the bar output, capabilities) are construction-only and never arrive here.
+    fn configure(&mut self, _cfg: &ModuleConfig) -> Reaction {
+        Reaction::none()
+    }
     /// Release any resources. Default: nothing (pure modules hold none).
     fn teardown(&mut self) {}
 }
