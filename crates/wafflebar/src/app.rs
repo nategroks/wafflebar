@@ -12,11 +12,13 @@ use gtk4::{Application, ApplicationWindow, CssProvider, Grid, Orientation};
 use gtk4_layer_shell::{Edge, Layer, LayerShell};
 use tracing::{debug, info, warn};
 use wafflebar_core::{
-    Align, Config, Event, GridEngine, Launch, Position, WindowManager, WmCommand,
+    Align, Config, Event, GridEngine, Launch, Position, Topic, VolumeCommand, WindowManager,
+    WmCommand,
 };
 
 use crate::event_loop;
 use crate::plugins;
+use crate::plugins::volume::backend::PulseBackend;
 use crate::render::{Host, PluginSlot};
 use crate::wm::DwlBackend;
 
@@ -238,7 +240,38 @@ fn build_grid_and_host(
     // Launch intents flow to the shell executor (DBus activation, falling back to spawn).
     let executor = crate::shell::executor::Executor::real();
     let launch_sink: Box<dyn Fn(&Launch)> = Box::new(move |intent| executor.execute(intent));
-    Host::new(slots, command_sink, launch_sink)
+
+    // Start the audio backend only if some plugin subscribes to it. Held alive by `volume_sink`
+    // (captured into the Host), so it lives as long as the bar.
+    let needs_audio = slots
+        .iter()
+        .any(|s| s.module.subscribe().contains(&Topic::Audio));
+    let audio = if needs_audio {
+        PulseBackend::new().map(|b| Rc::new(RefCell::new(b)))
+    } else {
+        None
+    };
+    let volume_sink: Box<dyn Fn(&VolumeCommand)> = match &audio {
+        Some(b) => {
+            let b = b.clone();
+            Box::new(move |cmd| b.borrow().execute(cmd))
+        }
+        None => Box::new(|_| {}),
+    };
+
+    let host = Host::new(slots, command_sink, launch_sink, volume_sink);
+
+    // Forward audio events into the host. `Weak` breaks the host → volume_sink → backend →
+    // handler → host cycle.
+    if let Some(b) = &audio {
+        let host_weak = Rc::downgrade(&host);
+        b.borrow().set_handler(move |ev| {
+            if let Some(h) = host_weak.upgrade() {
+                h.deliver_event(&Event::Volume(ev));
+            }
+        });
+    }
+    host
 }
 
 fn apply_align(widget: &impl IsA<gtk4::Widget>, align: Align) {
