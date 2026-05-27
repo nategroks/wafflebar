@@ -70,6 +70,16 @@ or a *CSS class on a constant icon*. Use a per-bucket icon **only when a real ic
 derived quantities with no such family (CPU load), keep the icon constant and tint via a CSS class —
 inventing `cpu-load-*` names would just render broken icons. Disk/thermal will face the same call.
 
+## Async backends: per-future on the main context, not a centralized executor
+A backend that drives D-Bus subscriptions (or one task per tracked thing) spawns a
+`glib::spawn_future_local` per concern on the main context, rather than one executor multiplexing
+them. Each future composes with the GLib loop the way the wl_display fd watch does; `deliver_event`
+runs on the main thread; zbus's own reactor handles the I/O threading. Instances so far: the network
+NM subscription (one future), and statustray (one future per tray item + the Watcher/Host).
+Justification: N is small and the tasks are independent, so GLib's scheduler handles them without a
+pool. Revisit only if a future plugin demonstrates main-loop saturation (e.g. high-volume
+notification signal traffic) — decide against real load, not anticipated load.
+
 ## Dependency discipline
 When a transitive dependency already re-exports what you'd otherwise add directly, use the
 re-export. (Network consumes zbus's signal stream via `zbus::export::ordered_stream` rather than
