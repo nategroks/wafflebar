@@ -8,7 +8,7 @@
 //! - [`grid`] — the grid layout engine (validates module placements on the `rows × columns` track).
 //! - [`view`] — [`View`], the GTK-free UI *description* a module returns.
 //! - [`wm`] — the [`WindowManager`] abstraction (Cairo-Dock GLDI model): events, commands, types.
-//! - [`module`] — the [`Module`] reducer contract (events in → `View` + `Reaction` out).
+//! - [`plugin`] — the [`Plugin`] reducer contract (events in → `View` + `Reaction` out).
 //! - [`fake`] — a scriptable [`WindowManager`] for tests.
 //!
 //! The GTK4 front-end (`wafflebar` binary) is the *host*: it renders `View`s to widgets, owns the
@@ -17,7 +17,7 @@
 pub mod config;
 pub mod fake;
 pub mod grid;
-pub mod module;
+pub mod plugin;
 pub mod view;
 pub mod wm;
 
@@ -26,6 +26,6 @@ pub use config::{
     SCHEMA_VERSION,
 };
 pub use grid::{GridEngine, GridError, Placement};
-pub use module::{Event, Module, Reaction, Topic};
+pub use plugin::{Event, Plugin, Reaction, Topic};
 pub use view::{ActionId, View};
 pub use wm::{Output, Tag, TagState, Window, WindowId, WindowManager, WmCommand, WmEvent};

@@ -5,7 +5,7 @@
 //! which owns all GTK/layer-shell concerns.
 
 mod app;
-mod modules;
+mod plugins;
 mod render;
 mod shell;
 mod wm;

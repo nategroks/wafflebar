@@ -1,4 +1,4 @@
-//! The `Module` contract.
+//! The `Plugin` contract.
 //!
 //! A module is a **pure reducer**: it owns some state, updates it from [`Event`]s it subscribed
 //! to, renders that state to a [`View`], and turns user actions into a [`Reaction`] (declarative
@@ -69,10 +69,10 @@ impl Reaction {
     }
 }
 
-/// A panel module. Object-safe so the host can hold `Box<dyn Module>`. Construction is done by
+/// A panel module. Object-safe so the host can hold `Box<dyn Plugin>`. Construction is done by
 /// the host's module registry (not a trait method), so this trait stays object-safe and free of
 /// constructor generics.
-pub trait Module {
+pub trait Plugin {
     /// Stable identifier (also used as a CSS class / log tag), e.g. `"clock"`.
     fn id(&self) -> &str;
     /// Which event topics should wake this module.

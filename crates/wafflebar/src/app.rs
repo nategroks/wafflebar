@@ -13,8 +13,8 @@ use gtk4_layer_shell::{Edge, Layer, LayerShell};
 use tracing::{debug, info, warn};
 use wafflebar_core::{Align, Config, Event, GridEngine, Position, WindowManager, WmCommand};
 
-use crate::modules;
-use crate::render::{Host, ModuleSlot};
+use crate::plugins;
+use crate::render::{Host, PluginSlot};
 use crate::wm::DwlBackend;
 
 /// Built-in Nord theme used when the config doesn't point at a CSS file.
@@ -196,7 +196,7 @@ fn build_grid_and_host(
     let mut slots = Vec::with_capacity(engine.placements.len());
     for placement in &engine.placements {
         let mcfg = &config.modules[placement.index];
-        let module = modules::build(&placement.kind, output, mcfg);
+        let module = plugins::build(&placement.kind, output, mcfg);
         let container = gtk4::Box::new(Orientation::Horizontal, 0);
         container.set_hexpand(true);
         apply_align(&container, placement.align);
@@ -207,7 +207,7 @@ fn build_grid_and_host(
             placement.colspan as i32,
             placement.rowspan as i32,
         );
-        slots.push(ModuleSlot {
+        slots.push(PluginSlot {
             kind: placement.kind.clone(),
             module,
             container,

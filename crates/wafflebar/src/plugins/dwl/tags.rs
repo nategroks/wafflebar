@@ -8,7 +8,7 @@
 //! `1 << index`. `ActionId`s and `WmCommand::FocusTag` carry the 0-based index.
 
 use wafflebar_core::{
-    ActionId, Event, Module, Reaction, Tag, TagState, Topic, View, WmCommand, WmEvent,
+    ActionId, Event, Plugin, Reaction, Tag, TagState, Topic, View, WmCommand, WmEvent,
 };
 
 /// The tags indicator for one output.
@@ -26,7 +26,7 @@ impl Tags {
     }
 }
 
-impl Module for Tags {
+impl Plugin for Tags {
     fn id(&self) -> &str {
         "tags"
     }

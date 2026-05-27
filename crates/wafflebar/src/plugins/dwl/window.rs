@@ -4,7 +4,7 @@
 //! `max_chars` config truncates long titles with an ellipsis (kept in the description rather
 //! than relying on host CSS so the truncation is testable and toolkit-independent).
 
-use wafflebar_core::{ActionId, Event, Module, Reaction, Topic, View, WmEvent};
+use wafflebar_core::{ActionId, Event, Plugin, Reaction, Topic, View, WmEvent};
 
 pub struct Window {
     output: String,
@@ -32,7 +32,7 @@ impl Window {
     }
 }
 
-impl Module for Window {
+impl Plugin for Window {
     fn id(&self) -> &str {
         "window"
     }

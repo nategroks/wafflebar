@@ -1,4 +1,4 @@
-//! `View` — the GTK-free description a [`Module`](crate::module::Module) returns.
+//! `View` — the GTK-free description a [`Plugin`](crate::plugin::Plugin) returns.
 //!
 //! **The v1→v2 isolation invariant (see `docs/ARCHITECTURE.md`):** nothing in this module may
 //! reference `gtk4` (or any toolkit). A `View` is a serializable *description* of UI; the host
@@ -10,7 +10,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Identifies an interactive element. Routed back to the owning module's
-/// [`Module::on_action`](crate::module::Module::on_action). Opaque + serializable on purpose.
+/// [`Plugin::on_action`](crate::plugin::Plugin::on_action). Opaque + serializable on purpose.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ActionId(pub String);
 
