@@ -39,6 +39,15 @@ X11/Wayland via WM hints).
 3. Mirror the *behavior* on our `Plugin` trait + `View` boundary.
 4. v1 implements the core; defer the rest with `// TODO(<plugin>): mirror …:<function>` markers.
 
+## Reducer discipline
+A plugin's `on_event` **must return `dirty=false` when its derived state is unchanged**, even if a
+`WmEvent` arrived. Compositors re-emit state (dwl re-sends `Tags`/`Windows` on frames and unrelated
+focus activity); dirtying on every arrival rebuilds widgets for no reason. The equality check
+belongs at the reducer boundary so every future plugin inherits the protection without asking. The
+keyed-diff reconcile (C2) is the *second* line of defense — it resolves an over-dirty to zero widget
+ops — not the first. (Found via instrumentation in C2: `tags`/`tasklist` were dirtying on every
+event, ~8 idle rebuilds of the tag row in 6s.)
+
 ## Roadmap (phases, each tied to a real directory)
 - **A** finish M2 — `tasklist` (this PR).
 - **B** plugin framework — `Plugin::configure` (per-instance TOML + `notify` live-reload), `launcher`, `separator`/`showdesktop`.
