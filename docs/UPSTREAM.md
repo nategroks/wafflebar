@@ -48,6 +48,17 @@ keyed-diff reconcile (C2) is the *second* line of defense — it resolves an ove
 ops — not the first. (Found via instrumentation in C2: `tags`/`tasklist` were dirtying on every
 event, ~8 idle rebuilds of the tag row in 6s.)
 
+## FFI callback re-entry
+Any FFI library that takes a callback and may call it **synchronously from inside the registering
+function** is a re-entry hazard whenever that callback touches state the registering site is already
+borrowing. libpulse does exactly this: it fires the context state callback from inside `connect()`,
+which we call while holding the `Context`'s `RefCell` borrow — the callback's `borrow()` then panics.
+The fix is to **defer the callback body to the next loop iteration** (`glib::idle_add_local`), so it
+runs after the borrow is released — *not* to restructure the borrow. Apply this reflexively to any
+future callback-style FFI (libnm, libpipewire, …). (Aside: a dev box with no audio server surfaced
+this on the CONNECTING→FAILED transition; a live server would have hit the same panic on
+CONNECTING→READY — the missing happy-path environment bought the bug early.)
+
 ## Roadmap (phases, each tied to a real directory)
 - **A** finish M2 — `tasklist` (this PR).
 - **B** plugin framework — `Plugin::configure` (per-instance TOML + `notify` live-reload), `launcher`, `separator`/`showdesktop`.
