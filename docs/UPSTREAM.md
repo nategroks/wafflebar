@@ -272,6 +272,34 @@ firing after teardown would act on a stale slot. Memory/CPU established this; cl
 reconciles timer *existence*, not period — a changed memory `interval` still needs a restart, since the
 poller's GLib timer is created with a fixed period.)
 
+## Backend reconciliation (F2c) — closing the F2b deferral
+F2c made the backend-class backends (volume/network/tray) hot-reconcilable, closing the F2b/F3/F4
+"add-first needs restart" limitations. **Rewireable sinks:** the command sinks no longer capture a
+concrete backend at `Host::new`; they route through a host-owned `Rc<RefCell<Backends>>` slot, so a
+backend can be started/stopped on a structural reload. Same shape as `TimerSet` — indirection through
+a mutable slot, reconciled (idempotent) on every rebuild. `Weak<Host>` in the delivery handlers, as
+always.
+
+**Teardown discipline is per-backend, not uniform — governed by what external observers see, not by
+symmetry.** Volume (libpulse) and network (zbus) **fully stop** on remove-last: drop the libpulse
+context (Drop disconnects); `JoinHandle::abort()` the network future (**the handle is the
+cancellation handle — it cancels the await at its point, doesn't block, so no separate `Cancellable`
+and no hang**; this resolved the F2b long-await worry). Tray is **start-once-keep**: dropping the SNI
+Watcher bus name fires `NameOwnerChanged` and makes *external* items re-register (visible flicker), so
+once started it persists — remove-last idles it (harmless single instance). The principle: a backend's
+teardown shape is dictated by the cost its teardown imposes on outside processes, not by making all
+three look the same.
+
+**`[bar]` reposition is live re-anchoring, not window recreation.** gtk4-layer-shell reconfigures a
+*mapped* surface, so a top↔bottom move is `set_anchor` + `auto_exclusive_zone_enable` on the live
+window + updating the host's `Cell<Position>` (for popover direction) — verified live. No destroy/
+recreate, no slot re-parenting. (This finding collapsed reposition from a potential F2c2 to ~80 lines.)
+
+**Gotcha caught by live-verify:** a `match` scrutinee's temporaries live until the *end of the match*,
+so `match f(cell.borrow().x) { … cell.borrow_mut() … }` panics "already borrowed". Hoist the read into
+a `let` before the match. (An `if` condition's temporaries drop before its body, so `if` is safe — but
+hoist for uniformity.)
+
 ## Design-note discipline
 A design note that reaches a finding **contradicting its own framing** is the phase working as
 intended, not a detour. The point of reading upstream / the existing code before committing to a design
