@@ -40,8 +40,9 @@ pub struct Host {
     /// Where `TrayCommand`s go (wired to the SNI backend, or a no-op when none is running).
     tray_sink: Box<dyn Fn(&TrayCommand)>,
     /// The bar's edge. Popovers open away from it (read at render time so a Phase F edge change is
-    /// picked up without a stale cached anchor).
-    position: Position,
+    /// picked up without a stale cached anchor). `Cell` so a live `[bar]` reposition (F2c) can update
+    /// it without rebuilding the host.
+    position: std::cell::Cell<Position>,
     /// Host-owned application data for the applications menu (E2): the app cache + recents. Empty
     /// unless an `appmenu` plugin is present and `app.rs` populates it. The menu widget reads it at
     /// render time; the directory watch refreshes it and re-renders.
@@ -63,9 +64,14 @@ impl Host {
             launch_sink,
             volume_sink,
             tray_sink,
-            position,
+            position: std::cell::Cell::new(position),
             menu: Rc::new(RefCell::new(crate::menu::MenuState::default())),
         })
+    }
+
+    /// Update the bar edge after a live `[bar]` reposition (F2c), so popovers open the right way.
+    pub fn set_position(&self, position: Position) {
+        self.position.set(position);
     }
 
     /// The host-owned applications-menu state (app cache + recents); shared, so `app.rs` can
@@ -458,7 +464,7 @@ fn build_popover(
     let popover = Popover::new();
     popover.set_child(Some(&render_view(content, slot, host)));
     popover.set_autohide(true);
-    popover.set_position(match host.position {
+    popover.set_position(match host.position.get() {
         Position::Top => gtk4::PositionType::Bottom, // top bar → open downward
         Position::Bottom => gtk4::PositionType::Top,  // bottom bar → open upward
     });
