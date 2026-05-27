@@ -116,8 +116,10 @@ an action emits `ActionInvoked` then closes (the popup→server reverse of the G
 `NotifyServer`'s stored connection). A visible cap (5; critical may exceed to a hard max) with a FIFO
 overflow queue — never drop, only on close/expiry. Image resolution priority: `image-path` hint →
 `app_icon` (icon name or absolute path) → generic fallback. The raw `image-data` hint is deferred (a
-TODO) — and note it's **RGBA, not the SNI ARGB32**, so it would *not* reuse `argb_to_rgba` when it
-lands (the design-note assumption was off there).
+TODO). **`argb_to_rgba` (D2c.1) has exactly two consumers — SNI icon and SNI attention, both ARGB32.**
+Notification `image-data` is **RGBA** (spec's Image Data Format: R,G,B,A; little-endian memory order
+differs from SNI's), so when it lands it needs its *own* conversion path, not `argb_to_rgba` — the
+design-note "third consumer" assumption was wrong.
 
 ## Finish what's nearly done before opening new surface
 At a milestone boundary, prefer finishing a nearly-done feature over starting a new one. An 80%-done
