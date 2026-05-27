@@ -133,12 +133,7 @@ fn present_bar(
     if let Some(mon) = monitor {
         window.set_monitor(Some(mon));
     }
-    let top = config.bar.position == Position::Top;
-    window.set_anchor(Edge::Left, true);
-    window.set_anchor(Edge::Right, true);
-    window.set_anchor(Edge::Top, top);
-    window.set_anchor(Edge::Bottom, !top);
-    window.auto_exclusive_zone_enable();
+    apply_bar_layout(&window, &config.bar);
     window.set_widget_name("wafflebar");
 
     // Right-click empty bar space → preferences window (F3). Clicks on plugin buttons are consumed
@@ -152,7 +147,7 @@ fn present_bar(
         window.add_controller(gesture);
     }
 
-    let (host, timers, caps) =
+    let BuiltBar { host, timers, caps, backends } =
         build_grid_and_host(&window, config, engine, &output_name, backend.clone());
     debug!(monitor = output_name, height = config.bar.height, "bar created");
     window.present();
@@ -189,18 +184,12 @@ fn present_bar(
     // change) rebuild every plugin via `rebuild` below. The host persists across a structural
     // rebuild, so its wiring (sinks, fd watch, backends holding `Weak<Host>`) stays valid.
     if let Some(path) = config_path {
-        // Initial backend presence, captured now: a rebuild can't hot-start the audio/network/tray
-        // backends (they hang off the host's immutable sinks — that's F2c), so we warn instead when
-        // an edit adds the first consumer of one that never started.
-        let had_audio = host.subscribes(&Topic::Audio);
-        let had_network = host.subscribes(&Topic::Network);
-        let had_tray = host.subscribes(&Topic::Tray);
-
         let rebuild: Rc<dyn Fn(&Config)> = {
             let window = window.clone();
             let output = output_name.clone();
             let host = host.clone();
             let timers = timers.clone();
+            let backends = backends.clone();
             Rc::new(move |new_config: &Config| {
                 let engine = match GridEngine::build(new_config) {
                     Ok(e) => e,
@@ -217,18 +206,17 @@ fn present_bar(
                 window.set_child(Some(&grid)); // drops the old grid and its containers
                 timers.borrow_mut().reconcile(&host, memory_interval_secs(new_config));
 
-                // Backends are not reconciled in F2b (see TimerSet docs): warn when an edit adds the
-                // first consumer of one that isn't running. A removed consumer's backend just idles
-                // (single instance — wasteful, not a leak).
-                if host.subscribes(&Topic::Audio) && !had_audio {
-                    warn!("structural reload: added the first volume module — restart to connect the audio backend (F2c hot-starts backends)");
-                }
-                if host.subscribes(&Topic::Network) && !had_network {
-                    warn!("structural reload: added the first network module — restart to connect the network backend (F2c)");
-                }
-                if host.subscribes(&Topic::Tray) && !had_tray {
-                    warn!("structural reload: added the first tray module — restart to start the tray backend (F2c)");
-                }
+                // F2c: reconcile the backend-class backends (add-first starts, remove-last stops —
+                // except tray, start-once-keep) and re-anchor the bar live for a `[bar]` reposition.
+                reconcile_backends(
+                    &backends,
+                    &host,
+                    host.subscribes(&Topic::Audio),
+                    host.subscribes(&Topic::Network),
+                    host.subscribes(&Topic::Tray),
+                );
+                apply_bar_layout(&window, &new_config.bar);
+                host.set_position(new_config.bar.position);
 
                 host.render_all();
                 info!(modules = engine.placements.len(), "structural reload applied");
@@ -236,6 +224,18 @@ fn present_bar(
         };
         crate::config_reload::watch_config(path.to_path_buf(), host.clone(), rebuild, config.clone());
     }
+}
+
+/// Apply the `[bar]` layer-shell layout (edge anchors + exclusive zone + height). gtk4-layer-shell
+/// reconfigures a *mapped* surface, so this works live for a reposition (F2c) — no window recreate.
+fn apply_bar_layout(window: &ApplicationWindow, bar: &wafflebar_core::BarConfig) {
+    let top = bar.position == Position::Top;
+    window.set_anchor(Edge::Left, true);
+    window.set_anchor(Edge::Right, true);
+    window.set_anchor(Edge::Top, top);
+    window.set_anchor(Edge::Bottom, !top);
+    window.set_default_height(bar.height as i32);
+    window.auto_exclusive_zone_enable();
 }
 
 /// Build the grid widget and one host-owned container per placement, instantiating each module's
@@ -305,7 +305,7 @@ fn build_grid_and_host(
     engine: &GridEngine,
     output: &str,
     backend: Option<Rc<RefCell<DwlBackend>>>,
-) -> (Rc<Host>, Rc<RefCell<TimerSet>>, plugins::Caps) {
+) -> BuiltBar {
     // Backend capabilities, queried once at init and handed to every plugin at construction. If a
     // future backend gains dynamic capabilities, lift this to a WmEvent::CapsChanged.
     let caps = plugins::Caps {
@@ -335,75 +335,39 @@ fn build_grid_and_host(
     let needs_tray = subscribes(&Topic::Tray);
     // The applications menu has no event topic; key off the placed module kind.
     let needs_appmenu = slots.iter().any(|s| s.kind == "appmenu");
-    let audio = if needs_audio {
-        PulseBackend::new().map(|b| Rc::new(RefCell::new(b)))
-    } else {
-        None
-    };
-    let volume_sink: Box<dyn Fn(&VolumeCommand)> = match &audio {
-        Some(b) => {
-            let b = b.clone();
-            Box::new(move |cmd| b.borrow().execute(cmd))
-        }
-        None => Box::new(|_| {}),
-    };
-
-    // SNI tray backend: created before the host (so tray_sink can hold it), started after (so its
-    // emit can hold a Weak<Host>) — same shape as the audio backend.
-    let tray = needs_tray.then(|| Rc::new(SniBackend::new()));
-    let tray_sink: Box<dyn Fn(&TrayCommand)> = match &tray {
-        Some(b) => {
-            let b = b.clone();
-            Box::new(move |cmd| match cmd {
-                TrayCommand::Activate { key } => b.activate(key),
-                TrayCommand::SecondaryActivate { key } => b.secondary_activate(key),
-                TrayCommand::Scroll { key, delta, horizontal } => b.scroll(key, *delta, *horizontal),
-                TrayCommand::MenuClick { key, id } => b.menu_click(key, *id),
-            })
-        }
-        None => Box::new(|_| {}),
-    };
-
-    let host = Host::new(
-        slots,
-        command_sink,
-        launch_sink,
-        volume_sink,
-        tray_sink,
-        config.bar.position,
-    );
-
-    // Forward audio events into the host. `Weak` breaks the host → volume_sink → backend →
-    // handler → host cycle.
-    if let Some(b) = &audio {
-        let host_weak = Rc::downgrade(&host);
-        b.borrow().set_handler(move |ev| {
-            if let Some(h) = host_weak.upgrade() {
-                h.deliver_event(&Event::Volume(ev));
+    // Backend-class plugins (volume/network/tray) are reconciled through a host-owned `Backends`
+    // slot (F2c): the sinks route through whatever's currently in it, so a backend can be started or
+    // stopped on a structural reload. Same shape as `TimerSet` — indirection through a mutable slot.
+    let backends = Rc::new(RefCell::new(Backends::default()));
+    let volume_sink: Box<dyn Fn(&VolumeCommand)> = {
+        let backends = backends.clone();
+        Box::new(move |cmd| {
+            if let Some(b) = backends.borrow().audio.as_ref() {
+                b.borrow().execute(cmd);
             }
-        });
-    }
-
-    // Network backend: a zbus subscription driven as a future on *this* (main) GLib context, so
-    // events arrive on the main thread. Started only if some plugin subscribes to Topic::Network.
-    if needs_network {
-        let host_weak = Rc::downgrade(&host);
-        glib::spawn_future_local(NmBackend.run(Box::new(move |state| {
-            if let Some(h) = host_weak.upgrade() {
-                h.deliver_event(&Event::Network(state));
+        })
+    };
+    let tray_sink: Box<dyn Fn(&TrayCommand)> = {
+        let backends = backends.clone();
+        Box::new(move |cmd| {
+            if let Some(b) = backends.borrow().tray.as_ref() {
+                match cmd {
+                    TrayCommand::Activate { key } => b.activate(key),
+                    TrayCommand::SecondaryActivate { key } => b.secondary_activate(key),
+                    TrayCommand::Scroll { key, delta, horizontal } => {
+                        b.scroll(key, *delta, *horizontal)
+                    }
+                    TrayCommand::MenuClick { key, id } => b.menu_click(key, *id),
+                }
             }
-        })));
-    }
+        })
+    };
 
-    // Start the tray backend now that the host exists (emit holds a Weak<Host>).
-    if let Some(b) = &tray {
-        let host_weak = Rc::downgrade(&host);
-        b.start(Rc::new(move |items| {
-            if let Some(h) = host_weak.upgrade() {
-                h.deliver_event(&Event::Tray(items));
-            }
-        }));
-    }
+    let host =
+        Host::new(slots, command_sink, launch_sink, volume_sink, tray_sink, config.bar.position);
+
+    // Start the backends the initial module set needs (re-run on every structural reload).
+    reconcile_backends(&backends, &host, needs_audio, needs_network, needs_tray);
 
     // Clock-tick + memory/CPU-poll timers are owned by the TimerSet and (re)created by reconcile,
     // which both this initial build and every structural reload call — so there's exactly one
@@ -423,7 +387,113 @@ fn build_grid_and_host(
         watch_app_dirs(&host);
     }
 
-    (host, timers, caps)
+    BuiltBar { host, timers, caps, backends }
+}
+
+/// What `build_grid_and_host` hands back: the host plus the host-level resource owners the reload
+/// path reconciles (timers, backends) and the queried caps reused by rebuilds.
+struct BuiltBar {
+    host: Rc<Host>,
+    timers: Rc<RefCell<TimerSet>>,
+    caps: plugins::Caps,
+    backends: Rc<RefCell<Backends>>,
+}
+
+/// Host-owned backend-class backends (F2c), reconciled on structural reload so add-first/remove-last
+/// of volume/network/tray applies live. The command sinks route through these slots; the delivery
+/// handlers hold `Weak<Host>` (no cycle). Held in `Rc<RefCell<_>>`, like `TimerSet`.
+#[derive(Default)]
+struct Backends {
+    audio: Option<Rc<RefCell<PulseBackend>>>,
+    tray: Option<Rc<SniBackend>>,
+    /// The network subscription future; `abort()` is its cancellation handle (drops the proxy).
+    network: Option<glib::JoinHandle<()>>,
+}
+
+/// What reconciling one backend against the new module set requires.
+#[derive(Debug, PartialEq, Eq)]
+enum BackendAction {
+    Start,
+    Stop,
+    None,
+}
+
+fn reconcile_action(want: bool, present: bool) -> BackendAction {
+    match (want, present) {
+        (true, false) => BackendAction::Start,
+        (false, true) => BackendAction::Stop,
+        _ => BackendAction::None,
+    }
+}
+
+/// Start/stop the backend-class backends to match what the host's current slots need. Idempotent;
+/// run at initial build and on every structural reload. Volume and network fully start/stop; **tray
+/// is start-once-keep** — once started it persists (idles on remove-last) to avoid dropping the SNI
+/// Watcher bus name, which external items observe as flicker (see docs/UPSTREAM.md).
+fn reconcile_backends(
+    backends: &Rc<RefCell<Backends>>,
+    host: &Rc<Host>,
+    want_audio: bool,
+    want_network: bool,
+    want_tray: bool,
+) {
+    // Audio (libpulse): start connects + wires delivery; stop drops the backend (Drop disconnects
+    // the context + releases the glib-mainloop integration).
+    // Hoist the presence check into a `let` so the `backends.borrow()` temporary is dropped before
+    // the arms — a `match` scrutinee's temporaries otherwise live through the whole match, colliding
+    // with the arm's `borrow_mut()` ("RefCell already borrowed").
+    let has_audio = backends.borrow().audio.is_some();
+    match reconcile_action(want_audio, has_audio) {
+        BackendAction::Start => {
+            if let Some(b) = PulseBackend::new().map(|b| Rc::new(RefCell::new(b))) {
+                let host_weak = Rc::downgrade(host);
+                b.borrow().set_handler(move |ev| {
+                    if let Some(h) = host_weak.upgrade() {
+                        h.deliver_event(&Event::Volume(ev));
+                    }
+                });
+                backends.borrow_mut().audio = Some(b);
+            }
+        }
+        BackendAction::Stop => backends.borrow_mut().audio = None,
+        BackendAction::None => {}
+    }
+
+    // Network (zbus subscription as a future): abort() is the cancellation handle — it drops the
+    // future at its await point, releasing the proxy + connection; it doesn't block, so no hang.
+    let has_network = backends.borrow().network.is_some();
+    match reconcile_action(want_network, has_network) {
+        BackendAction::Start => {
+            let host_weak = Rc::downgrade(host);
+            let handle = glib::spawn_future_local(NmBackend.run(Box::new(move |state| {
+                if let Some(h) = host_weak.upgrade() {
+                    h.deliver_event(&Event::Network(state));
+                }
+            })));
+            backends.borrow_mut().network = Some(handle);
+        }
+        BackendAction::Stop => {
+            if let Some(handle) = backends.borrow_mut().network.take() {
+                handle.abort();
+            }
+        }
+        BackendAction::None => {}
+    }
+
+    // Tray (SNI): start-once-keep. Starting acquires the Watcher bus name; dropping it would fire
+    // NameOwnerChanged and make external items re-register (visible flicker), so we never stop it —
+    // remove-last just idles it (harmless single instance). Re-adding reuses the live backend.
+    let has_tray = backends.borrow().tray.is_some();
+    if want_tray && !has_tray {
+        let b = Rc::new(SniBackend::new());
+        let host_weak = Rc::downgrade(host);
+        b.start(Rc::new(move |items| {
+            if let Some(h) = host_weak.upgrade() {
+                h.deliver_event(&Event::Tray(items));
+            }
+        }));
+        backends.borrow_mut().tray = Some(b);
+    }
 }
 
 /// Watch the XDG `applications` dirs; on a change (debounced like the config watch — mass package
@@ -619,6 +689,15 @@ fn load_css(display: &gdk::Display, theme: Option<&str>) {
 mod tests {
     use super::*;
     use wafflebar_core::{Launch, Position, TrayCommand, VolumeCommand, WmCommand};
+
+    #[test]
+    fn backend_reconcile_matrix() {
+        // want / present → action. Symmetric for volume/network; tray ignores Stop (start-once-keep).
+        assert_eq!(reconcile_action(true, false), BackendAction::Start);
+        assert_eq!(reconcile_action(false, true), BackendAction::Stop);
+        assert_eq!(reconcile_action(true, true), BackendAction::None);
+        assert_eq!(reconcile_action(false, false), BackendAction::None);
+    }
 
     /// A slot-less host: building real `PluginSlot`s would need `gtk4::Box`es, and creating GTK
     /// widgets here would init GTK on this test's thread — but libtest gives each test its own
