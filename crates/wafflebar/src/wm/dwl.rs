@@ -168,6 +168,9 @@ impl DwlBackend {
     /// fd has been signalled readable by GLib, so `read()` won't block; then `dispatch_pending`.
     /// We also `flush()` first so our outgoing requests are on the wire.
     pub fn dispatch(&mut self) -> Vec<WmEvent> {
+        // TODO(backpressure): flush errors (incl. EAGAIN when the compositor socket is full) are
+        // ignored here, as they were under the poll loop. Real handling — queue + retry on
+        // writable — is its own discussion; unchanged in C3 on purpose.
         let _ = self.conn.flush();
         if let Some(guard) = self.conn.prepare_read() {
             let _ = guard.read(); // non-blocking: GLib told us the fd is readable
