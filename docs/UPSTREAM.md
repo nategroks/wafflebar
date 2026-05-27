@@ -48,6 +48,17 @@ keyed-diff reconcile (C2) is the *second* line of defense — it resolves an ove
 ops — not the first. (Found via instrumentation in C2: `tags`/`tasklist` were dirtying on every
 event, ~8 idle rebuilds of the tag row in 6s.)
 
+**Derive to the display value first, then equality-check** — compare *what the user sees*, not the
+raw signal. A continuous source (wifi strength, memory bytes, CPU fraction) feeding a discrete
+display (a signal-bucket icon, a rounded percent) must round/bucket *before* the dirty check, so
+sub-display-resolution jitter produces zero re-renders (volume sub-percent, network signal bucket,
+memory `34.7%`→`34.9%` both render `34%`).
+
+## Dependency discipline
+When a transitive dependency already re-exports what you'd otherwise add directly, use the
+re-export. (Network consumes zbus's signal stream via `zbus::export::ordered_stream` rather than
+pulling in `futures-util` — one fewer `Cargo.toml` line, one fewer version-skew risk.)
+
 ## FFI callback re-entry
 Any FFI library that takes a callback and may call it **synchronously from inside the registering
 function** is a re-entry hazard whenever that callback touches state the registering site is already
