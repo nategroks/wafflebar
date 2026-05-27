@@ -42,6 +42,10 @@ pub struct Host {
     /// The bar's edge. Popovers open away from it (read at render time so a Phase F edge change is
     /// picked up without a stale cached anchor).
     position: Position,
+    /// Host-owned application data for the applications menu (E2): the app cache + recents. Empty
+    /// unless an `appmenu` plugin is present and `app.rs` populates it. The menu widget reads it at
+    /// render time; the directory watch refreshes it and re-renders.
+    menu: Rc<RefCell<crate::menu::MenuState>>,
 }
 
 impl Host {
@@ -60,7 +64,20 @@ impl Host {
             volume_sink,
             tray_sink,
             position,
+            menu: Rc::new(RefCell::new(crate::menu::MenuState::default())),
         })
+    }
+
+    /// The host-owned applications-menu state (app cache + recents); shared, so `app.rs` can
+    /// populate/refresh it and the menu widget can read + record launches into it.
+    pub fn menu(&self) -> Rc<RefCell<crate::menu::MenuState>> {
+        self.menu.clone()
+    }
+
+    /// Send a launch intent to the shell executor (used by the host-rendered applications menu,
+    /// which launches directly rather than round-tripping through a reducer).
+    pub fn run_launch(&self, intent: &Launch) {
+        (self.launch_sink)(intent);
     }
 
     /// Distinct timer intervals (seconds) any module subscribes to.
@@ -150,6 +167,25 @@ impl Host {
     pub fn render_all(self: &Rc<Self>) {
         let n = self.slots.borrow().len();
         for i in 0..n {
+            self.rerender(i);
+        }
+    }
+
+    /// Force-rebuild any `appmenu` slots (E2). `View::AppMenu` is a static marker — its `View`
+    /// doesn't change when the host app cache does — so the keyed diff would skip it; clearing
+    /// `last_view` forces a full rebuild that reads the refreshed cache. Called by the directory
+    /// watch after an install/uninstall reparse.
+    pub fn refresh_appmenu(self: &Rc<Self>) {
+        let slots: Vec<usize> = self
+            .slots
+            .borrow()
+            .iter()
+            .enumerate()
+            .filter(|(_, s)| s.kind == "appmenu")
+            .map(|(i, _)| i)
+            .collect();
+        for i in slots {
+            self.slots.borrow_mut()[i].last_view = None;
             self.rerender(i);
         }
     }
@@ -399,6 +435,9 @@ pub fn render_view(view: &View, slot: usize, host: &Rc<Host>) -> gtk4::Widget {
         }
         View::Popover { trigger, content, classes } => {
             build_popover(trigger, content, classes, slot, host).0
+        }
+        View::AppMenu { favorites, show_recents, max_recents } => {
+            crate::menu::build_appmenu(favorites, *show_recents, *max_recents, host)
         }
     }
 }

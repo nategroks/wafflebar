@@ -7,6 +7,7 @@
 mod app;
 mod config_reload;
 mod event_loop;
+mod menu;
 mod plugins;
 mod prefs;
 mod render;
