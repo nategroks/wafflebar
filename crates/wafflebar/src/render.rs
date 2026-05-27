@@ -257,8 +257,13 @@ pub fn render_view(view: &View, slot: usize, host: &Rc<Host>) -> gtk4::Widget {
             add_classes(&l, classes);
             l.upcast()
         }
-        View::Icon { name, size, classes } => {
-            let img = gtk4::Image::from_icon_name(name);
+        View::Icon { name, size, classes, pixmap } => {
+            // Prefer the themed name; fall back to the raw pixmap when the name is empty or not in
+            // the theme; otherwise let GTK show its missing-icon placeholder for `name`.
+            let img = match pixmap {
+                Some(px) if name.is_empty() || !icon_in_theme(name) => image_from_pixmap(px),
+                _ => gtk4::Image::from_icon_name(name),
+            };
             img.set_pixel_size(*size as i32);
             add_classes(&img, classes);
             img.upcast()
@@ -428,6 +433,28 @@ fn build_menu(menu: &[MenuItem], slot: usize, host: &Rc<Host>) -> Popover {
     }
     popover.set_child(Some(&vbox));
     popover
+}
+
+/// Whether `name` resolves in the current display's icon theme. Only consulted when an `Icon` has a
+/// pixmap fallback (so we know whether to use the name or the pixmap).
+fn icon_in_theme(name: &str) -> bool {
+    gdk::Display::default()
+        .map(|d| gtk4::IconTheme::for_display(&d).has_icon(name))
+        .unwrap_or(false)
+}
+
+/// Build a `gtk::Image` from a [`Pixmap`] (RGBA bytes → `GdkMemoryTexture`, a paintable). The Image
+/// scales it to the requested pixel size at display time.
+fn image_from_pixmap(px: &wafflebar_core::Pixmap) -> gtk4::Image {
+    let bytes = gtk4::glib::Bytes::from(&px.rgba);
+    let texture = gdk::MemoryTexture::new(
+        px.width as i32,
+        px.height as i32,
+        gdk::MemoryFormat::R8g8b8a8,
+        &bytes,
+        (px.width * 4) as usize, // stride: 4 bytes/pixel, no padding
+    );
+    gtk4::Image::from_paintable(Some(&texture))
 }
 
 fn add_classes(w: &impl IsA<gtk4::Widget>, classes: &[String]) {

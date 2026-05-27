@@ -48,9 +48,11 @@ impl Plugin for StatusTray {
             .iter()
             .map(|item| {
                 // Icon by themed name; placeholder when absent (pixmap icons are D2c).
+                // Themed name preferred; pixmap fallback (the renderer chooses); placeholder if
+                // neither. Left-click → Activate; right-click → the DBusMenu (B2b Button.menu).
                 let icon = item.icon_name.as_deref().unwrap_or("application-x-executable");
-                // Left-click → Activate; right-click → the DBusMenu context menu (B2b Button.menu).
                 View::icon(icon, 16)
+                    .with_pixmap(item.icon_pixmap.clone())
                     .with_class("tray-icon")
                     .button(ActionId::new(format!("{ACTION_ACTIVATE}{}", item.key)))
                     .with_menu(item.menu.clone())
@@ -102,6 +104,7 @@ mod tests {
             id: key.into(),
             title: key.into(),
             icon_name: icon.map(str::to_string),
+            icon_pixmap: None,
             status,
             menu: Vec::new(),
         }
