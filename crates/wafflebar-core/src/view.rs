@@ -82,6 +82,11 @@ pub enum View {
         action: ActionId,
         classes: Vec<String>,
         menu: Vec<MenuItem>,
+        /// Stable identity for keyed reconciliation when this button is a list element (e.g. a
+        /// tasklist entry keyed by toplevel handle id). `None` → the renderer keys it by position.
+        /// See `reconcile`. Plugins set this when the list is non-positional so reordering/removal
+        /// reuses the right widgets instead of rebuilding siblings.
+        key: Option<String>,
     },
     /// Expanding empty space (pushes neighbours apart).
     Spacer,
@@ -135,7 +140,17 @@ impl View {
             action: action.into(),
             classes: Vec::new(),
             menu: Vec::new(),
+            key: None,
         }
+    }
+
+    /// Set the reconciliation key (no-op unless `self` is a `Button`). Use for list elements whose
+    /// identity is data-derived (tasklist handle id, tag index) rather than positional.
+    pub fn with_key(mut self, key: impl Into<String>) -> View {
+        if let View::Button { key: k, .. } = &mut self {
+            *k = Some(key.into());
+        }
+        self
     }
 
     /// Attach a right-click context menu (no-op unless `self` is a `Button`).
@@ -152,6 +167,44 @@ impl View {
             classes.push(class.into());
         }
         self
+    }
+
+    /// Short tag naming this node's variant — part of the default (positional) reconcile key, so a
+    /// `Label` and an `Icon` at the same index never alias.
+    pub fn variant_tag(&self) -> &'static str {
+        match self {
+            View::Label { .. } => "label",
+            View::Icon { .. } => "icon",
+            View::Row { .. } => "row",
+            View::Col { .. } => "col",
+            View::Button { .. } => "button",
+            View::Spacer => "spacer",
+            View::Separator { .. } => "sep",
+            View::Popover { .. } => "popover",
+            View::Empty => "empty",
+        }
+    }
+
+    /// The plugin-set reconcile key, if any (only `Button` carries one today).
+    pub fn explicit_key(&self) -> Option<&str> {
+        match self {
+            View::Button { key, .. } => key.as_deref(),
+            _ => None,
+        }
+    }
+
+    /// Number of nodes in this subtree (self + descendants). Instrumentation aid: a full rebuild
+    /// recreates this many widgets, so logging it exposes any plugin rebuilding far more than its
+    /// data changed (a reactivity bug the full-rebuild shortcut would otherwise mask).
+    pub fn node_count(&self) -> usize {
+        1 + match self {
+            View::Row { children, .. } | View::Col { children, .. } => {
+                children.iter().map(View::node_count).sum()
+            }
+            View::Button { child, .. } => child.node_count(),
+            View::Popover { trigger, content, .. } => trigger.node_count() + content.node_count(),
+            _ => 0,
+        }
     }
 
     fn classes_mut(&mut self) -> Option<&mut Vec<String>> {
