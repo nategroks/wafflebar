@@ -31,6 +31,10 @@ libpulse-glib-binding = "2.29"
 # Preferences-UI write-back (F3): edits the user's config.toml in place, preserving comments, key
 # order, and whitespace. A serialize-from-`Config` round-trip would discard all of that.
 toml_edit = "0.22"
+# Notification server (G): bridge `Notify` calls from zbus's executor thread to the GLib main
+# thread. The spec has no "posted" signal to ride (unlike the SNI Watcher's ItemRegistered), so a
+# thread-safe channel is the iface→main bridge. Already resolved transitively via zbus.
+async-channel = "2.5"
 # GTK + Wayland deps are added via `cargo add` (M1) so versions resolve compatibly.
 
 [dev-dependencies]

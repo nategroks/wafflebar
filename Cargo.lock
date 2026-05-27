@@ -1809,6 +1809,7 @@ name = "wafflebar"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-channel",
  "chrono",
  "clap",
  "gtk4",
