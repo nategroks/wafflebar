@@ -105,7 +105,8 @@ impl DwlBackend {
         Ok(Self { conn, queue, state })
     }
 
-    /// Raw fd for GLib `unix_fd_add_local`.
+    /// Raw fd, ready for true fd-readable integration (calloop / g_unix_fd_add) — see app.rs.
+    #[allow(dead_code)]
     pub fn fd(&self) -> RawFd {
         self.conn.as_fd().as_raw_fd()
     }

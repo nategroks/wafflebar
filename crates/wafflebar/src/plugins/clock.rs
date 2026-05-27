@@ -1,10 +1,10 @@
-//! Clock module — a `Module` that re-renders on each timer tick.
+//! Clock module — a `Plugin` that re-renders on each timer tick.
 //!
 //! Canary for the `View` boundary (see `docs/ARCHITECTURE.md`): a read-only module should be
 //! trivial on the trait. It is — `view()` is one `View::label(formatted_time)`.
 
 use chrono::Local;
-use wafflebar_core::{ActionId, Event, Module, ModuleConfig, Reaction, Topic, View};
+use wafflebar_core::{ActionId, Event, Plugin, ModuleConfig, Reaction, Topic, View};
 
 const DEFAULT_FORMAT: &str = "%a %d %b   %H:%M";
 
@@ -20,7 +20,7 @@ impl Clock {
     }
 }
 
-impl Module for Clock {
+impl Plugin for Clock {
     fn id(&self) -> &str {
         "clock"
     }

@@ -1,16 +1,16 @@
-//! Module registry: maps a config `type` to a boxed [`Module`].
+//! Plugin registry: maps a config `type` to a boxed [`Plugin`].
 //!
 //! Modules are GTK-free reducers (see `docs/ARCHITECTURE.md`); the host renders their `View`.
 //! Unknown types fall back to a [`Placeholder`] module that renders a dim label — *not* a
-//! special code path, just another `Module`.
+//! special code path, just another `Plugin`.
 
 pub mod clock;
 pub mod dwl;
 
-use wafflebar_core::{ActionId, Event, Module, ModuleConfig, Reaction, Topic, View};
+use wafflebar_core::{ActionId, Event, Plugin, ModuleConfig, Reaction, Topic, View};
 
 /// Construct a module for `kind`, bound to `output` (the bar's monitor) and `cfg`.
-pub fn build(kind: &str, output: &str, cfg: &ModuleConfig) -> Box<dyn Module> {
+pub fn build(kind: &str, output: &str, cfg: &ModuleConfig) -> Box<dyn Plugin> {
     match kind {
         "clock" => Box::new(clock::Clock::new(cfg)),
         "tags" => Box::new(dwl::tags::Tags::new(output)),
@@ -35,7 +35,7 @@ impl Placeholder {
     }
 }
 
-impl Module for Placeholder {
+impl Plugin for Placeholder {
     fn id(&self) -> &str {
         &self.kind
     }

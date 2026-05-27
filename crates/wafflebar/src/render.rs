@@ -1,4 +1,4 @@
-//! The host side of the `Module` contract: render a [`View`] to GTK widgets, own the widget
+//! The host side of the `Plugin` contract: render a [`View`] to GTK widgets, own the widget
 //! tree, and route user actions back to modules.
 //!
 //! Nothing here leaks GTK back into the module layer — modules only ever produce `View`s and
@@ -10,25 +10,25 @@ use std::rc::Rc;
 use gtk4::prelude::*;
 use gtk4::{GestureClick, Orientation};
 use tracing::debug;
-use wafflebar_core::{ActionId, Event, Module, Reaction, Topic, View, WmCommand};
+use wafflebar_core::{ActionId, Event, Plugin, Reaction, Topic, View, WmCommand};
 
 /// One placed module: its kind (for logging), the boxed reducer, and the host-owned container
 /// widget whose child is rebuilt on every dirty update.
-pub struct ModuleSlot {
+pub struct PluginSlot {
     pub kind: String,
-    pub module: Box<dyn Module>,
+    pub module: Box<dyn Plugin>,
     pub container: gtk4::Box,
 }
 
 /// Owns all module slots and the command sink, and drives rendering + action routing.
 pub struct Host {
-    slots: RefCell<Vec<ModuleSlot>>,
+    slots: RefCell<Vec<PluginSlot>>,
     /// Where `WmCommand`s go (wired by the binary to the active backend's `execute`).
     command_sink: Box<dyn Fn(&WmCommand)>,
 }
 
 impl Host {
-    pub fn new(slots: Vec<ModuleSlot>, command_sink: Box<dyn Fn(&WmCommand)>) -> Rc<Self> {
+    pub fn new(slots: Vec<PluginSlot>, command_sink: Box<dyn Fn(&WmCommand)>) -> Rc<Self> {
         Rc::new(Self {
             slots: RefCell::new(slots),
             command_sink,
