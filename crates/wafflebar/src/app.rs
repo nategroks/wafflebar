@@ -333,6 +333,8 @@ fn build_grid_and_host(
     let needs_audio = subscribes(&Topic::Audio);
     let needs_network = subscribes(&Topic::Network);
     let needs_tray = subscribes(&Topic::Tray);
+    // The applications menu has no event topic; key off the placed module kind.
+    let needs_appmenu = slots.iter().any(|s| s.kind == "appmenu");
     let audio = if needs_audio {
         PulseBackend::new().map(|b| Rc::new(RefCell::new(b)))
     } else {
@@ -409,7 +411,51 @@ fn build_grid_and_host(
     let timers = Rc::new(RefCell::new(TimerSet::default()));
     timers.borrow_mut().reconcile(&host, memory_interval_secs(config));
 
+    // Applications menu (E2): populate the host app cache + recents once, and watch the application
+    // dirs so installs/uninstalls refresh the menu. Only when an appmenu module is placed.
+    if needs_appmenu {
+        {
+            let state = host.menu();
+            let mut m = state.borrow_mut();
+            m.apps = wafflebar_core::list_applications();
+            m.recents = wafflebar_core::Recents::load();
+        }
+        watch_app_dirs(&host);
+    }
+
     (host, timers, caps)
+}
+
+/// Watch the XDG `applications` dirs; on a change (debounced like the config watch — mass package
+/// installs fire bursts), reparse the app list into the host cache and rebuild the menu. The
+/// monitors live for the process (leaked like the fd/config watches).
+fn watch_app_dirs(host: &Rc<Host>) {
+    let debounce: Rc<RefCell<Option<glib::SourceId>>> = Rc::new(RefCell::new(None));
+    for dir in wafflebar_core::application_dirs() {
+        let monitor = match gtk4::gio::File::for_path(&dir)
+            .monitor_directory(gtk4::gio::FileMonitorFlags::NONE, gtk4::gio::Cancellable::NONE)
+        {
+            Ok(m) => m,
+            Err(_) => continue, // dir may not exist; skip it
+        };
+        let (host_weak, debounce) = (Rc::downgrade(host), debounce.clone());
+        monitor.connect_changed(move |_, _, _, _| {
+            if let Some(id) = debounce.borrow_mut().take() {
+                id.remove();
+            }
+            let (host_weak, debounce_inner) = (host_weak.clone(), debounce.clone());
+            let id = glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
+                *debounce_inner.borrow_mut() = None;
+                if let Some(host) = host_weak.upgrade() {
+                    host.menu().borrow_mut().apps = wafflebar_core::list_applications();
+                    host.refresh_appmenu();
+                }
+                glib::ControlFlow::Break
+            });
+            *debounce.borrow_mut() = Some(id);
+        });
+        std::mem::forget(monitor);
+    }
 }
 
 /// The memory module's configured poll interval in seconds (default 5). Read from config because

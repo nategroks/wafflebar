@@ -4,6 +4,7 @@
 //! Unknown types fall back to a [`Placeholder`] module that renders a dim label — *not* a
 //! special code path, just another `Plugin`.
 
+pub mod appmenu;
 pub mod clock;
 pub mod cpu;
 pub mod dwl;
@@ -28,6 +29,7 @@ pub struct Caps {
 /// Construct a module for `kind`, bound to `output` (the bar's monitor), `cfg`, and backend `caps`.
 pub fn build(kind: &str, output: &str, cfg: &ModuleConfig, caps: &Caps) -> Box<dyn Plugin> {
     match kind {
+        "appmenu" => Box::new(appmenu::AppMenu::new(cfg)),
         "clock" => Box::new(clock::Clock::new(cfg)),
         "tags" => Box::new(dwl::tags::Tags::new(output)),
         "window" => Box::new(dwl::window::Window::new(output, dwl::window::read_max_chars(cfg))),
@@ -69,6 +71,7 @@ pub fn catalog() -> Vec<PluginInfo> {
     let info =
         |kind, name, description, icon, unique| PluginInfo { kind, name, description, icon, unique };
     vec![
+        info("appmenu", "Applications", "A searchable menu of installed applications.", "view-app-grid-symbolic", false),
         info("clock", "Clock", "Date and time.", "preferences-system-time-symbolic", false),
         info("launcher", "Launcher", "Pinned application shortcuts.", "applications-other-symbolic", false),
         info("separator", "Separator", "Blank space, a line, or a grip; can expand to push items apart.", "view-list-symbolic", false),
