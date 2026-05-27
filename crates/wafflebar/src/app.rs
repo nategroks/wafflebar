@@ -18,6 +18,7 @@ use wafflebar_core::{
 
 use crate::event_loop;
 use crate::plugins;
+use crate::plugins::network::backend::{NetworkBackend, NmBackend};
 use crate::plugins::volume::backend::PulseBackend;
 use crate::render::{Host, PluginSlot};
 use crate::wm::DwlBackend;
@@ -243,9 +244,9 @@ fn build_grid_and_host(
 
     // Start the audio backend only if some plugin subscribes to it. Held alive by `volume_sink`
     // (captured into the Host), so it lives as long as the bar.
-    let needs_audio = slots
-        .iter()
-        .any(|s| s.module.subscribe().contains(&Topic::Audio));
+    let subscribes = |topic: &Topic| slots.iter().any(|s| s.module.subscribe().contains(topic));
+    let needs_audio = subscribes(&Topic::Audio);
+    let needs_network = subscribes(&Topic::Network);
     let audio = if needs_audio {
         PulseBackend::new().map(|b| Rc::new(RefCell::new(b)))
     } else {
@@ -270,6 +271,17 @@ fn build_grid_and_host(
                 h.deliver_event(&Event::Volume(ev));
             }
         });
+    }
+
+    // Network backend: a zbus subscription driven as a future on *this* (main) GLib context, so
+    // events arrive on the main thread. Started only if some plugin subscribes to Topic::Network.
+    if needs_network {
+        let host_weak = Rc::downgrade(&host);
+        glib::spawn_future_local(NmBackend.run(Box::new(move |state| {
+            if let Some(h) = host_weak.upgrade() {
+                h.deliver_event(&Event::Network(state));
+            }
+        })));
     }
     host
 }

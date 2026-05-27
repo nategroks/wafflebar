@@ -7,6 +7,7 @@
 pub mod clock;
 pub mod dwl;
 pub mod launcher;
+pub mod network;
 pub mod separator;
 pub mod showdesktop;
 pub mod tasklist;
@@ -38,6 +39,7 @@ pub fn build(kind: &str, output: &str, cfg: &ModuleConfig, caps: &Caps) -> Box<d
         "separator" => Box::new(separator::Separator::new(cfg)),
         "showdesktop" => Box::new(showdesktop::ShowDesktop::new(caps)),
         "volume" => Box::new(volume::Volume::new()),
+        "network" => Box::new(network::Network::new()),
         other => Box::new(Placeholder::new(other)),
     }
 }
