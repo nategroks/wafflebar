@@ -11,6 +11,7 @@ use crate::cpu::CpuState;
 use crate::freedesktop::Launch;
 use crate::memory::MemoryState;
 use crate::net::NetworkState;
+use crate::tray::{TrayCommand, TrayItem};
 use crate::view::{ActionId, View};
 use crate::wm::WmCommand;
 use serde::{Deserialize, Serialize};
@@ -34,6 +35,9 @@ pub enum Topic {
     Memory,
     /// CPU load deltas. The host starts the CPU polling backend only if some plugin subscribes.
     Cpu,
+    /// StatusNotifier (system tray) item changes. The host starts the SNI backend only if some
+    /// plugin subscribes to this.
+    Tray,
 }
 
 /// An event delivered to a subscribed module.
@@ -51,6 +55,8 @@ pub enum Event {
     Memory(MemoryState),
     /// A CPU load delta from the host's polling backend.
     Cpu(CpuState),
+    /// The current tray item list from the host's SNI backend (full snapshot on any change).
+    Tray(Vec<TrayItem>),
 }
 
 /// A module's response to an event or action: whether its view changed, plus any side effects
@@ -69,6 +75,8 @@ pub struct Reaction {
     pub launch: Vec<Launch>,
     /// Audio commands for the host's audio backend (e.g. toggle mute, adjust volume).
     pub volume: Vec<VolumeCommand>,
+    /// Tray commands for the host's SNI backend (e.g. activate an item).
+    pub tray: Vec<TrayCommand>,
 }
 
 impl Reaction {
@@ -108,6 +116,13 @@ impl Reaction {
     pub fn volume(cmd: VolumeCommand) -> Self {
         Self {
             volume: vec![cmd],
+            ..Self::default()
+        }
+    }
+    /// Issue one tray command.
+    pub fn tray(cmd: TrayCommand) -> Self {
+        Self {
+            tray: vec![cmd],
             ..Self::default()
         }
     }
