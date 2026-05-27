@@ -37,6 +37,9 @@ pub struct TrayItem {
     /// Raw-image fallback from `IconPixmap` (best size selected, ARGB→RGBA swapped). `None` if the
     /// item ships no pixmap.
     pub icon_pixmap: Option<Pixmap>,
+    /// The item's `IconThemePath` (a non-standard dir it ships icons in), resolved *per item* so one
+    /// item's path can't pollute another's icon resolution. `None` if unset.
+    pub icon_theme_path: Option<String>,
     pub status: TrayStatus,
     /// The item's context menu (DBusMenu), as flat top-level [`MenuItem`]s — empty if the item has
     /// no `Menu`. Each `Item`'s action is `menu:<key>:<dbusmenu-id>`, routed back to
@@ -50,6 +53,11 @@ pub struct TrayItem {
 pub enum TrayCommand {
     /// `org.kde.StatusNotifierItem.Activate(x, y)` on the item with this `key`.
     Activate { key: String },
+    /// `org.kde.StatusNotifierItem.SecondaryActivate(x, y)` (middle-click).
+    SecondaryActivate { key: String },
+    /// `org.kde.StatusNotifierItem.Scroll(delta, orientation)`. `delta` is signed (per the SNI
+    /// convention: up = -1, down = +1); `horizontal` picks the orientation string.
+    Scroll { key: String, delta: i32, horizontal: bool },
     /// `com.canonical.dbusmenu.Event(id, "clicked", …)` — a context-menu entry was clicked.
     MenuClick { key: String, id: i32 },
 }

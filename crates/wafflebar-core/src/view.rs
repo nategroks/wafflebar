@@ -83,7 +83,15 @@ pub enum View {
     /// raw-image fallback. The host uses `name` if it resolves in the theme; otherwise it renders
     /// `pixmap` (e.g. an SNI tray item's `IconPixmap`); otherwise a placeholder. GTK-free: `pixmap`
     /// is RGBA bytes, the host builds the actual `GdkPixbuf`.
-    Icon { name: String, size: u32, classes: Vec<String>, pixmap: Option<Pixmap> },
+    Icon {
+        name: String,
+        size: u32,
+        classes: Vec<String>,
+        pixmap: Option<Pixmap>,
+        /// A non-standard directory to also search when resolving `name` (SNI `IconThemePath`).
+        /// Resolved per-icon against a scoped theme so it never pollutes global resolution.
+        theme_path: Option<String>,
+    },
     /// A horizontal container.
     Row { children: Vec<View>, gap: u32, classes: Vec<String> },
     /// A vertical container.
@@ -105,6 +113,8 @@ pub enum View {
         /// `None` → no scroll handling. Minimal first scroll affordance; not generalized.
         scroll_up: Option<ActionId>,
         scroll_down: Option<ActionId>,
+        /// Action dispatched on middle-click (SNI tray `SecondaryActivate`). `None` → no handling.
+        action_middle: Option<ActionId>,
     },
     /// Expanding empty space (pushes neighbours apart).
     Spacer,
@@ -140,6 +150,7 @@ impl View {
             size,
             classes: Vec::new(),
             pixmap: None,
+            theme_path: None,
         }
     }
 
@@ -148,6 +159,14 @@ impl View {
     pub fn with_pixmap(mut self, pixmap: Option<Pixmap>) -> View {
         if let View::Icon { pixmap: p, .. } = &mut self {
             *p = pixmap;
+        }
+        self
+    }
+
+    /// Attach a per-icon theme search dir (SNI `IconThemePath`); no-op unless `self` is an `Icon`.
+    pub fn with_theme_path(mut self, path: Option<String>) -> View {
+        if let View::Icon { theme_path, .. } = &mut self {
+            *theme_path = path;
         }
         self
     }
@@ -171,6 +190,7 @@ impl View {
             key: None,
             scroll_up: None,
             scroll_down: None,
+            action_middle: None,
         }
     }
 
@@ -179,6 +199,14 @@ impl View {
         if let View::Button { scroll_up, scroll_down, .. } = &mut self {
             *scroll_up = Some(up.into());
             *scroll_down = Some(down.into());
+        }
+        self
+    }
+
+    /// Attach a middle-click action (no-op unless `self` is a `Button`).
+    pub fn with_middle_click(mut self, action: impl Into<ActionId>) -> View {
+        if let View::Button { action_middle, .. } = &mut self {
+            *action_middle = Some(action.into());
         }
         self
     }
