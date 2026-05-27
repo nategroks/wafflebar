@@ -38,4 +38,27 @@ impl Plugin for Separator {
     fn on_action(&mut self, _action: &ActionId) -> Reaction {
         Reaction::none()
     }
+
+    fn configure(&mut self, cfg: &ModuleConfig) -> Reaction {
+        *self = Self::new(cfg); // config-only: reconstruct
+        Reaction::dirty()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::plugins::test_module_config as cfg;
+
+    #[test]
+    fn configure_re_reads_style_and_expand() {
+        let mut s = Separator::new(&cfg(&[]));
+        assert!(matches!(s.style, SeparatorStyle::Line) && !s.expand);
+        let r = s.configure(&cfg(&[
+            ("style", toml::Value::from("dots")),
+            ("expand", toml::Value::from(true)),
+        ]));
+        assert!(r.dirty);
+        assert!(matches!(s.style, SeparatorStyle::Dots) && s.expand);
+    }
 }

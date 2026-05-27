@@ -114,6 +114,12 @@ impl Plugin for Launcher {
             }
         }
     }
+
+    fn configure(&mut self, cfg: &wafflebar_core::ModuleConfig) -> Reaction {
+        // Config-only: reconstruct, re-resolving the .desktop `items` against the new config.
+        *self = Self::new(cfg);
+        Reaction::dirty()
+    }
 }
 
 impl Launcher {
@@ -233,6 +239,21 @@ mod tests {
         }
         assert!(parse_action("bogus").is_none());
         assert!(parse_action("launch:notanumber").is_none());
+    }
+
+    #[test]
+    fn configure_re_resolves_items() {
+        let dir = tempdir();
+        let path = write_desktop(
+            dir.path(),
+            "app.desktop",
+            "[Desktop Entry]\nType=Application\nName=App\nExec=app\n",
+        );
+        let mut l = Launcher::new(&cfg_with(vec![path]));
+        assert_eq!(l.apps.len(), 1);
+        let r = l.configure(&cfg_with(vec![])); // items removed
+        assert!(r.dirty);
+        assert_eq!(l.apps.len(), 0, "reconfigure re-resolves the items list");
     }
 
     #[test]

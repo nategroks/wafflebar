@@ -15,10 +15,15 @@
 //! - show-only-minimized — `set_show_only_minimized`
 
 use wafflebar_core::{
-    ActionId, Event, Plugin, Reaction, Topic, View, Window, WmCommand, WmEvent,
+    ActionId, Event, ModuleConfig, Plugin, Reaction, Topic, View, Window, WmCommand, WmEvent,
 };
 
 const FALLBACK_ICON: &str = "application-x-executable";
+
+/// Read `max_chars` (0 = no truncation). Shared by the registry and `configure`.
+pub(crate) fn read_max_chars(cfg: &ModuleConfig) -> usize {
+    cfg.opt_i64("max_chars").unwrap_or(0).max(0) as usize
+}
 
 pub struct Tasklist {
     output: String,
@@ -117,12 +122,28 @@ impl Plugin for Tasklist {
         }
         Reaction::none()
     }
+
+    fn configure(&mut self, cfg: &ModuleConfig) -> Reaction {
+        // Re-read the option; `output` and the live window list are preserved.
+        self.max_chars = read_max_chars(cfg);
+        Reaction::dirty()
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::plugins::test_module_config as cfg;
     use wafflebar_core::fake::FakeWm;
+
+    #[test]
+    fn configure_re_reads_max_chars_preserving_output() {
+        let mut t = Tasklist::new("eDP-1", 0);
+        let r = t.configure(&cfg(&[("max_chars", toml::Value::from(20))]));
+        assert!(r.dirty);
+        assert_eq!(t.max_chars, 20);
+        assert_eq!(t.output, "eDP-1");
+    }
 
     fn win(id: u64, title: &str, app_id: &str, focused: bool, outputs: &[&str]) -> Window {
         Window {

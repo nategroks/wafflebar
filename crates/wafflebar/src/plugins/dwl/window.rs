@@ -4,7 +4,13 @@
 //! `max_chars` config truncates long titles with an ellipsis (kept in the description rather
 //! than relying on host CSS so the truncation is testable and toolkit-independent).
 
-use wafflebar_core::{ActionId, Event, Plugin, Reaction, Topic, View, WmEvent};
+use wafflebar_core::{ActionId, Event, ModuleConfig, Plugin, Reaction, Topic, View, WmEvent};
+
+/// Read the `max_chars` option (0 = no truncation). Shared by the registry (construction) and
+/// `configure` (reload) so the extraction lives in one place.
+pub(crate) fn read_max_chars(cfg: &ModuleConfig) -> usize {
+    cfg.opt_i64("max_chars").unwrap_or(0).max(0) as usize
+}
 
 pub struct Window {
     output: String,
@@ -67,12 +73,28 @@ impl Plugin for Window {
     fn on_action(&mut self, _action: &ActionId) -> Reaction {
         Reaction::none()
     }
+
+    fn configure(&mut self, cfg: &ModuleConfig) -> Reaction {
+        // Re-read the option; `output` (placement) and runtime title/app_id are preserved.
+        self.max_chars = read_max_chars(cfg);
+        Reaction::dirty()
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::plugins::test_module_config as cfg;
     use wafflebar_core::fake::FakeWm;
+
+    #[test]
+    fn configure_re_reads_max_chars_preserving_output() {
+        let mut w = Window::new("eDP-1", 0);
+        let r = w.configure(&cfg(&[("max_chars", toml::Value::from(12))]));
+        assert!(r.dirty);
+        assert_eq!(w.max_chars, 12);
+        assert_eq!(w.output, "eDP-1", "placement output is preserved across reconfigure");
+    }
 
     #[test]
     fn shows_active_title() {

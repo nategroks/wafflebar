@@ -89,6 +89,29 @@ future server-side surface (a Phase G notifications server, a Wafflebar control 
 the same shape: the GLib loop is the source of truth for stateful work; the zbus executor is a thin
 transport.
 
+## Finish what's nearly done before opening new surface
+At a milestone boundary, prefer finishing a nearly-done feature over starting a new one. An 80%-done
+feature is a *quality* problem (works for the common case, breaks on edges — users experience it as
+broken), which is worse than a 0%-done *feature gap* (users know it's absent). Exceptions: a genuine
+architectural unknown is blocking, or the new surface is on a deadline. (D2c finished statustray
+before opening E/F/G.)
+
+## Pay down accumulating debt before adding components
+When a *class* of debt is accumulating across multiple components, paying it down outranks adding new
+components — even when the new ones are individually more exciting. Adding components before the
+paydown extends the debt surface and the eventual migration. This is the finish-before-opening
+principle scaled from one feature to a debt class. (Phase F was taken over E/G because every C1
+plugin shipped `TODO(F)` config markers, and each new plugin would add more.)
+
+## Phase F is shaped by the GTK-free-plugin invariant
+F looks different from xfce4-panel *by design*. xfce plugins own GTK settings dialogs and bind
+GObject properties to Xfconf; our plugins are GTK-free reducers, so neither is available to us. The
+`configure(&ModuleConfig) -> Reaction` trait surface (uniform, object-safe — a per-plugin typed
+config struct would break `Box<dyn Plugin>`) and host-rendered schema-driven settings forms are
+*forced* by the M2 invariant, not chosen. That the trait shape makes F doable at all validates the
+M2 call that no GTK type crosses the plugin boundary. Resist "just let plugins build their own
+dialogs" during F3 — it would break the v1→v2 isolation that the whole architecture rests on.
+
 ## Defer optimizations until the architecture demonstrably fails
 Optimizations are deferred until the architecture demonstrably fails to prevent the load case they
 target. The reducer-diff-keyed pipeline prevents most redundant work *by construction* (value-compare

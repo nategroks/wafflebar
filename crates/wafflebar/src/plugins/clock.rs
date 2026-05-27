@@ -45,4 +45,25 @@ impl Plugin for Clock {
     fn on_action(&mut self, _action: &ActionId) -> Reaction {
         Reaction::none()
     }
+
+    fn configure(&mut self, cfg: &ModuleConfig) -> Reaction {
+        // Config-only plugin: reconstruct from the new config (dedupes new()/configure()).
+        *self = Self::new(cfg);
+        Reaction::dirty()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::plugins::test_module_config as cfg;
+
+    #[test]
+    fn configure_re_reads_format() {
+        let mut c = Clock::new(&cfg(&[("format", toml::Value::from("%H:%M"))]));
+        assert_eq!(c.format, "%H:%M");
+        let r = c.configure(&cfg(&[("format", toml::Value::from("%H:%M:%S"))]));
+        assert!(r.dirty);
+        assert_eq!(c.format, "%H:%M:%S");
+    }
 }

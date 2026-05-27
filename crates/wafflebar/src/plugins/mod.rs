@@ -30,14 +30,8 @@ pub fn build(kind: &str, output: &str, cfg: &ModuleConfig, caps: &Caps) -> Box<d
     match kind {
         "clock" => Box::new(clock::Clock::new(cfg)),
         "tags" => Box::new(dwl::tags::Tags::new(output)),
-        "window" => Box::new(dwl::window::Window::new(
-            output,
-            cfg.opt_i64("max_chars").unwrap_or(0).max(0) as usize,
-        )),
-        "tasklist" => Box::new(tasklist::Tasklist::new(
-            output,
-            cfg.opt_i64("max_chars").unwrap_or(0).max(0) as usize,
-        )),
+        "window" => Box::new(dwl::window::Window::new(output, dwl::window::read_max_chars(cfg))),
+        "tasklist" => Box::new(tasklist::Tasklist::new(output, tasklist::read_max_chars(cfg))),
         "launcher" => Box::new(launcher::Launcher::new(cfg)),
         "separator" => Box::new(separator::Separator::new(cfg)),
         "showdesktop" => Box::new(showdesktop::ShowDesktop::new(caps)),
@@ -47,6 +41,18 @@ pub fn build(kind: &str, output: &str, cfg: &ModuleConfig, caps: &Caps) -> Box<d
         "cpu" => Box::new(cpu::Cpu::new()),
         "statustray" => Box::new(statustray::StatusTray::new()),
         other => Box::new(Placeholder::new(other)),
+    }
+}
+
+/// Build a `ModuleConfig` with the given options for tests (the `configure` migration tests).
+#[cfg(test)]
+pub(crate) fn test_module_config(options: &[(&str, toml::Value)]) -> ModuleConfig {
+    use wafflebar_core::Cell;
+    ModuleConfig {
+        kind: "test".into(),
+        cell: Cell { row: 0, col: 0, rowspan: 1, colspan: 1 },
+        align: Default::default(),
+        options: options.iter().map(|(k, v)| (k.to_string(), v.clone())).collect(),
     }
 }
 
