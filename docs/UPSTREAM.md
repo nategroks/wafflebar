@@ -189,6 +189,31 @@ across reinstalls, never the path). Capped at 50 with lowest-score eviction — 
 arbitrary expiry (frecency ranks the long tail). Persisted to `$XDG_DATA_HOME/wafflebar/recents.toml`
 on each launch (user-paced, tiny file). Corrupt file → start fresh, never block the menu.
 
+**`View::AppMenu` — the host-rendered-rich-content escape hatch (E2).** The boundary rule, now
+validated twice (prefs forms, the apps menu): **reducer-derived state goes through `View`;
+immediate-mode interactive state lives in the host widget.** Search-as-you-type, multi-pane focus,
+scrolled selection have no meaningful reducer derivation — pushing keystrokes through
+`Event → reducer → View → re-render` would be the wrong epistemic model (the reducer computing on
+data it doesn't own). So `View::AppMenu` is a *marker*: the reducer carries only its config
+(favorites, recents settings, which it does own), and the host builds the whole widget from the
+GTK-free `core::menu`/`core::recents` data it holds. The invariant is for *plugin* isolation (v1→v2);
+host infrastructure (renderer, prefs, the menu UI) was never going to be process-isolated, so
+host-rendering it isn't a carve-out. Future surfaces with substantial non-reducer-derived UI state
+(file pickers, wizards) follow the same pattern: a narrow marker variant + a host widget; don't
+expand `View` into an immediate-mode toolkit.
+
+**Cold-open is show-only by construction.** The menu content is built at render time (startup, and
+on the directory watch's refresh), not on open — `View::AppMenu` is a static marker, so the keyed
+diff would skip it on a cache change, which is why the watch force-rebuilds the appmenu slots
+(`Host::refresh_appmenu`, clearing `last_view`). Opening the popover just shows pre-built widgets, so
+the reparse-on-open bottleneck the <200ms target guards against is structurally avoided. The
+directory watch is **host-side** (gio belongs with its consumer; `core::menu` stays a pure function).
+
+**Founding scope.** E2 lands the applications menu — the last of the original prompt's three pillars
+(applications menu + system tray (D2) + widget customization (F)), all working across tiling WMs by
+design. Keyboard navigation (E3) is the finishing enhancement on the menu; F2c closes the
+backend-reconciliation gap; then notifications (G) and CSS theming round out v1.0.
+
 ## Defer optimizations until the architecture demonstrably fails
 Optimizations are deferred until the architecture demonstrably fails to prevent the load case they
 target. The reducer-diff-keyed pipeline prevents most redundant work *by construction* (value-compare
