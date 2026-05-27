@@ -28,6 +28,9 @@ zbus = "5.15.0"
 libpulse-binding = "2.30"
 # Integrates libpulse's mainloop API into GLib so subscription events wake our existing loop rather than a separate thread.
 libpulse-glib-binding = "2.29"
+# Preferences-UI write-back (F3): edits the user's config.toml in place, preserving comments, key
+# order, and whitespace. A serialize-from-`Config` round-trip would discard all of that.
+toml_edit = "0.22"
 # GTK + Wayland deps are added via `cargo add` (M1) so versions resolve compatibly.
 
 [dev-dependencies]

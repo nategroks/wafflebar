@@ -8,6 +8,7 @@ mod app;
 mod config_reload;
 mod event_loop;
 mod plugins;
+mod prefs;
 mod render;
 mod shell;
 mod wm;
