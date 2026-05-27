@@ -5,6 +5,7 @@
 //! special code path, just another `Plugin`.
 
 pub mod clock;
+pub mod cpu;
 pub mod dwl;
 pub mod launcher;
 pub mod memory;
@@ -42,6 +43,7 @@ pub fn build(kind: &str, output: &str, cfg: &ModuleConfig, caps: &Caps) -> Box<d
         "volume" => Box::new(volume::Volume::new()),
         "network" => Box::new(network::Network::new()),
         "memory" => Box::new(memory::Memory::new()),
+        "cpu" => Box::new(cpu::Cpu::new()),
         other => Box::new(Placeholder::new(other)),
     }
 }

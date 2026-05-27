@@ -50,6 +50,12 @@ window#wafflebar {
 }
 .wb-menu-item:hover { background-color: #434c5e; }
 
+/* cpu: aggregate load percent; bucket classes tint as it climbs */
+.cpu { padding: 0 6px; }
+.cpu .cpu-icon { color: #b48ead; }
+.cpu.high .cpu-label     { color: #ebcb8b; }
+.cpu.critical .cpu-label { color: #bf616a; font-weight: bold; }
+
 /* memory: RAM usage percent; pressure classes tint as it climbs */
 .memory { padding: 0 6px; }
 .memory .mem-icon { color: #a3be8c; }
