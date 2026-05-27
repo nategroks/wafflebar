@@ -153,6 +153,11 @@ impl ModuleConfig {
         self.options.get(key).and_then(toml::Value::as_integer)
     }
 
+    /// Fetch a boolean option by key (e.g. the separator's `expand`).
+    pub fn opt_bool(&self, key: &str) -> Option<bool> {
+        self.options.get(key).and_then(toml::Value::as_bool)
+    }
+
     /// Fetch an array-of-strings option by key (e.g. the launcher's `items`).
     /// Non-array values and non-string elements are dropped; missing key → empty.
     pub fn opt_str_list(&self, key: &str) -> Vec<String> {

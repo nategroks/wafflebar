@@ -49,3 +49,23 @@ window#wafflebar {
     color: #d8dee9;
 }
 .wb-menu-item:hover { background-color: #434c5e; }
+
+/* separator: blank space, a rule, a handle grip, or dots. Thickness/size are CSS, not config. */
+.wb-separator { margin: 4px 2px; }
+.wb-separator.transparent { /* nothing — pure (optionally expanding) space */ }
+.wb-separator.line { color: #4c566a; }            /* gtk::Separator draws from `color` */
+.wb-separator.handle {
+    min-width: 6px;
+    /* a vertical dotted grip */
+    background-image: radial-gradient(circle, #4c566a 1px, transparent 1px);
+    background-size: 6px 6px;
+    background-repeat: repeat-y;
+    background-position: center;
+}
+.wb-separator.dots {
+    min-width: 4px;
+    background-image: radial-gradient(circle, #4c566a 1.5px, transparent 1.5px);
+    background-size: 4px 8px;
+    background-repeat: repeat-y;
+    background-position: center;
+}

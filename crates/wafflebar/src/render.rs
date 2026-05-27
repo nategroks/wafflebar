@@ -10,7 +10,9 @@ use std::rc::Rc;
 use gtk4::prelude::*;
 use gtk4::{gdk, GestureClick, Orientation, Popover, Separator};
 use tracing::debug;
-use wafflebar_core::{ActionId, Event, Launch, MenuItem, Plugin, Reaction, Topic, View, WmCommand};
+use wafflebar_core::{
+    ActionId, Event, Launch, MenuItem, Plugin, Reaction, SeparatorStyle, Topic, View, WmCommand,
+};
 
 /// One placed module: its kind (for logging), the boxed reducer, and the host-owned container
 /// widget whose child is rebuilt on every dirty update.
@@ -184,6 +186,25 @@ pub fn render_view(view: &View, slot: usize, host: &Rc<Host>) -> gtk4::Widget {
             }
             b.upcast()
         }
+        View::Separator { style, expand } => {
+            // The bar is horizontal in v1 (top/bottom), so a separator runs along the cross-axis
+            // (vertical). `Line` uses a real gtk::Separator; the textured styles are CSS-painted
+            // boxes. `expand` is plain GTK box hexpand — shared proportionally with other
+            // expanding children (the "[left] | gap | [right]" idiom).
+            let w: gtk4::Widget = match style {
+                SeparatorStyle::Line => Separator::new(Orientation::Vertical).upcast(),
+                _ => gtk4::Box::new(Orientation::Vertical, 0).upcast(),
+            };
+            w.add_css_class("wb-separator");
+            w.add_css_class(match style {
+                SeparatorStyle::Transparent => "transparent",
+                SeparatorStyle::Line => "line",
+                SeparatorStyle::Handle => "handle",
+                SeparatorStyle::Dots => "dots",
+            });
+            w.set_hexpand(*expand);
+            w
+        }
         // v1: popover content is unused (no v1 module emits Popover); render the trigger.
         // TODO(M3): wrap in a gtk::Popover and render `content` on demand.
         View::Popover { trigger, .. } => render_view(trigger, slot, host),
@@ -244,5 +265,48 @@ fn spawn(argv: &[String]) {
         if let Err(e) = std::process::Command::new(cmd).args(args).spawn() {
             debug!(?argv, error = %e, "spawn failed");
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Once;
+
+    static INIT: Once = Once::new();
+    /// Initialize GTK once; returns false when there's no display (CI without a session) so the
+    /// widget tests self-skip rather than fail.
+    fn gtk_ready() -> bool {
+        INIT.call_once(|| {
+            let _ = gtk4::init();
+        });
+        gtk4::is_initialized()
+    }
+
+    fn host() -> Rc<Host> {
+        Host::new(Vec::new(), Box::new(|_: &WmCommand| {}), Box::new(|_: &Launch| {}))
+    }
+
+    fn sep(style: SeparatorStyle, expand: bool) -> View {
+        View::Separator { style, expand }
+    }
+
+    #[test]
+    fn separator_expand_is_honored_by_renderer() {
+        if !gtk_ready() {
+            return; // no display — nothing to assert against
+        }
+        let h = host();
+        // expand flag maps to GTK hexpand (which is what makes it fill / share space).
+        assert!(render_view(&sep(SeparatorStyle::Line, true), 0, &h).hexpands());
+        assert!(!render_view(&sep(SeparatorStyle::Transparent, false), 0, &h).hexpands());
+
+        // Two expanding separators in one row both hexpand → GTK shares the row proportionally.
+        let row = gtk4::Box::new(Orientation::Horizontal, 0);
+        let a = render_view(&sep(SeparatorStyle::Line, true), 0, &h);
+        let b = render_view(&sep(SeparatorStyle::Line, true), 0, &h);
+        row.append(&a);
+        row.append(&b);
+        assert!(a.hexpands() && b.hexpands());
     }
 }
