@@ -6,6 +6,7 @@
 //! v1→v2 isolation invariant in `docs/ARCHITECTURE.md`. This keeps the whole boundary
 //! serializable and makes the eventual external-process step a transport wrapper, not a rewrite.
 
+use crate::audio::{VolumeCommand, VolumeEvent};
 use crate::freedesktop::Launch;
 use crate::view::{ActionId, View};
 use crate::wm::WmCommand;
@@ -19,6 +20,9 @@ pub enum Topic {
     Wm,
     /// A periodic tick every `secs` seconds.
     Timer { secs: u32 },
+    /// Audio (default-sink volume/mute) changes. The host starts the audio backend only if some
+    /// plugin subscribes to this.
+    Audio,
 }
 
 /// An event delivered to a subscribed module.
@@ -28,6 +32,8 @@ pub enum Event {
     Wm(crate::wm::WmEvent),
     /// A timer tick for the given interval.
     Tick { secs: u32 },
+    /// An audio state change from the host's audio backend.
+    Volume(VolumeEvent),
 }
 
 /// A module's response to an event or action: whether its view changed, plus any side effects
@@ -44,6 +50,8 @@ pub struct Reaction {
     /// Same discipline as `commands`: the plugin emits pure-data intents, the executor performs
     /// them — `zbus`/`Command` never appear in the plugin layer.
     pub launch: Vec<Launch>,
+    /// Audio commands for the host's audio backend (e.g. toggle mute, adjust volume).
+    pub volume: Vec<VolumeCommand>,
 }
 
 impl Reaction {
@@ -76,6 +84,13 @@ impl Reaction {
     pub fn launch(intent: Launch) -> Self {
         Self {
             launch: vec![intent],
+            ..Self::default()
+        }
+    }
+    /// Issue one audio command.
+    pub fn volume(cmd: VolumeCommand) -> Self {
+        Self {
+            volume: vec![cmd],
             ..Self::default()
         }
     }

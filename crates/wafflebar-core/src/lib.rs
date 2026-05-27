@@ -14,6 +14,7 @@
 //! The GTK4 front-end (`wafflebar` binary) is the *host*: it renders `View`s to widgets, owns the
 //! widget tree, runs the GLib main loop, and provides the concrete compositor backends.
 
+pub mod audio;
 pub mod config;
 pub mod fake;
 pub mod freedesktop;
@@ -27,6 +28,7 @@ pub use config::{
     Align, BarConfig, Cell, Config, ConfigError, GridConfig, ModuleConfig, Position,
     SCHEMA_VERSION,
 };
+pub use audio::{VolumeCommand, VolumeEvent, VOLUME_NORM};
 pub use freedesktop::{DesktopAction, DesktopApp, Launch};
 pub use grid::{GridEngine, GridError, Placement};
 pub use plugin::{Event, Plugin, Reaction, Topic};
