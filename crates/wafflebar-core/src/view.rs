@@ -30,6 +30,33 @@ impl ActionId {
     }
 }
 
+/// A [`View::Separator`]'s visual style — mirrors xfce4-panel's separator plugin styles
+/// (`plugins/separator/separator.c`). Thickness/size come from CSS, not config.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum SeparatorStyle {
+    /// Blank, fully transparent space.
+    Transparent,
+    /// A single rule (xfce4-panel's default).
+    #[default]
+    Line,
+    /// The dotted-bar grip ("handle").
+    Handle,
+    /// A column/row of dots.
+    Dots,
+}
+
+impl SeparatorStyle {
+    /// Parse a config string; unknown/empty falls back to the default ([`SeparatorStyle::Line`]).
+    pub fn parse(s: &str) -> Self {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "transparent" => SeparatorStyle::Transparent,
+            "handle" => SeparatorStyle::Handle,
+            "dots" => SeparatorStyle::Dots,
+            _ => SeparatorStyle::Line,
+        }
+    }
+}
+
 impl<T: Into<String>> From<T> for ActionId {
     fn from(s: T) -> Self {
         ActionId(s.into())
@@ -58,6 +85,10 @@ pub enum View {
     },
     /// Expanding empty space (pushes neighbours apart).
     Spacer,
+    /// A separator between plugins. `expand: true` makes it take all available space (the
+    /// xfce4-panel "Expand" option) — the idiom for "left plugins | gap | right plugins".
+    /// Thickness/size are CSS, not config. The host renders this along the bar's cross-axis.
+    Separator { style: SeparatorStyle, expand: bool },
     /// A trigger that reveals `content` in a popover. The affordance exists in the contract from
     /// v1 (see ARCHITECTURE.md) so popover-bearing modules add content, not plumbing; v1 modules
     /// (tags/window/taskbar) do not emit this yet.
@@ -131,7 +162,7 @@ impl View {
             | View::Col { classes, .. }
             | View::Button { classes, .. }
             | View::Popover { classes, .. } => Some(classes),
-            View::Spacer | View::Empty => None,
+            View::Spacer | View::Separator { .. } | View::Empty => None,
         }
     }
 }
