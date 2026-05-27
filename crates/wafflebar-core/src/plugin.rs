@@ -12,6 +12,7 @@ use crate::cpu::CpuState;
 use crate::freedesktop::Launch;
 use crate::memory::MemoryState;
 use crate::net::NetworkState;
+use crate::schema::ConfigField;
 use crate::tray::{TrayCommand, TrayItem};
 use crate::view::{ActionId, View};
 use crate::wm::WmCommand;
@@ -152,4 +153,10 @@ pub trait Plugin {
     }
     /// Release any resources. Default: nothing (pure modules hold none).
     fn teardown(&mut self) {}
+    /// Describe this module's configurable options for the preferences UI (F3). Returns field
+    /// *descriptions* (key/label/kind/default), never current values — the host reads and writes
+    /// values through the TOML, the single source of truth. Default: no configurable options.
+    fn config_schema(&self) -> Vec<ConfigField> {
+        Vec::new()
+    }
 }

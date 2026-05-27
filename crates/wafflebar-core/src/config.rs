@@ -143,6 +143,17 @@ pub struct ModuleConfig {
 }
 
 impl ModuleConfig {
+    /// A minimal config for a kind with no options and a 1×1 cell at the origin. Used to build a
+    /// throwaway reducer purely to read its static `config_schema()` (F3) — never placed on a grid.
+    pub fn bare(kind: &str) -> Self {
+        Self {
+            kind: kind.to_string(),
+            cell: Cell { row: 0, col: 0, rowspan: 1, colspan: 1 },
+            align: Align::default(),
+            options: BTreeMap::new(),
+        }
+    }
+
     /// Fetch a string option by key (e.g. `format` for the clock module).
     pub fn opt_str(&self, key: &str) -> Option<&str> {
         self.options.get(key).and_then(toml::Value::as_str)
