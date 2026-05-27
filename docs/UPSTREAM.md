@@ -166,6 +166,29 @@ new module's options (F4), and a future reset-to-default affordance (F5+). It's 
 (what the field shows when the key is absent), not a current-value snapshot, so it doesn't reintroduce
 the two-sources problem. Don't remove or repurpose it casually.
 
+**`PluginInfo.unique` is a coarse global flag — lift to a `Uniqueness` variant when multi-monitor
+lands.** It's `true` only for `statustray` today. Two consumers now want a finer scope: Add Items
+(disabling the second instance of a per-output plugin on a given output) and a future multi-monitor
+preferences UI. When someone implements per-output placement properly, lift `unique: bool` to
+`Uniqueness::{Global, PerOutput, None}`. Deferring the variant was right — one consumer, one true case.
+
+## Applications menu (E) — categorize, don't parse `.menu`
+The menu groups apps by their `Categories=` key into the freedesktop registered **Main Categories**
+(Audio/Video fold into AudioVideo; first registered category in an app's list wins; unmatched →
+"Other"), *not* by parsing the Menu-Spec `.menu` XML. The main buckets are the user-visible value;
+the full `.menu` tree (distro custom layouts, `<Include>`/`<Exclude>`, merge order) is large, fragile,
+and has no adopted Rust crate — deferred until a real custom-layout consumer appears. `core::menu`
+consumes F4's `list_applications()` and adds categorization on top: the F4/E split (F4 = list/search,
+E = categorize) designed at F4, validated here. The directory watch that rebuilds on app
+install/uninstall is **host-side** (gio, E2), not core — `core::menu::categorized()` is a pure
+rebuilt-on-demand function (core is GTK/gio-free).
+
+**Recents = frecency, not last-N.** `launches × 2^(-age_days / 30)` (30-day half-life): recency ranks
+recent launches up without discarding frequently-used apps. Keyed by desktop-file **id** (stable
+across reinstalls, never the path). Capped at 50 with lowest-score eviction — bounded growth, no
+arbitrary expiry (frecency ranks the long tail). Persisted to `$XDG_DATA_HOME/wafflebar/recents.toml`
+on each launch (user-paced, tiny file). Corrupt file → start fresh, never block the menu.
+
 ## Defer optimizations until the architecture demonstrably fails
 Optimizations are deferred until the architecture demonstrably fails to prevent the load case they
 target. The reducer-diff-keyed pipeline prevents most redundant work *by construction* (value-compare
