@@ -16,7 +16,7 @@ pub struct ActionId(pub String);
 
 /// An entry in a [`View::Button`]'s right-click context menu. Order is preserved as given
 /// (e.g. desktop-file `Actions=` order — never re-sorted).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum MenuItem {
     /// A clickable label routing `action` to the owning plugin.
     Item { label: String, action: ActionId },
