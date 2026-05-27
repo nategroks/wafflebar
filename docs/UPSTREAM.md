@@ -54,6 +54,13 @@ display (a signal-bucket icon, a rounded percent) must round/bucket *before* the
 sub-display-resolution jitter produces zero re-renders (volume sub-percent, network signal bucket,
 memory `34.7%`→`34.9%` both render `34%`).
 
+## Bucketed display: icon family vs CSS class
+A continuous quantity shown as a bucketed visual can map the bucket to either a per-bucket *icon*
+or a *CSS class on a constant icon*. Use a per-bucket icon **only when a real icon family exists**
+(network does: `network-wireless-signal-{none,weak,ok,good,excellent}` is freedesktop-standard). For
+derived quantities with no such family (CPU load), keep the icon constant and tint via a CSS class —
+inventing `cpu-load-*` names would just render broken icons. Disk/thermal will face the same call.
+
 ## Dependency discipline
 When a transitive dependency already re-exports what you'd otherwise add directly, use the
 re-export. (Network consumes zbus's signal stream via `zbus::export::ordered_stream` rather than
