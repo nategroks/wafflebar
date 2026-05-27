@@ -80,6 +80,15 @@ Justification: N is small and the tasks are independent, so GLib's scheduler han
 pool. Revisit only if a future plugin demonstrates main-loop saturation (e.g. high-volume
 notification signal traffic) — decide against real load, not anticipated load.
 
+**Server-side D-Bus handlers must be minimal and dispatch substantive work to the main thread via
+`spawn_future_local`.** zbus `#[interface]` handlers run on zbus's executor (they're `Send + Sync`)
+and must not assume main-thread context — touching `Rc`/main-thread state from them is unsound. The
+statustray Watcher handlers only record into an `Arc<Mutex<…>>` and emit a signal; the Host, the
+per-item futures, and pruning all run on the main thread and coordinate through bus signals. Any
+future server-side surface (a Phase G notifications server, a Wafflebar control interface) follows
+the same shape: the GLib loop is the source of truth for stateful work; the zbus executor is a thin
+transport.
+
 ## Dependency discipline
 When a transitive dependency already re-exports what you'd otherwise add directly, use the
 re-export. (Network consumes zbus's signal stream via `zbus::export::ordered_stream` rather than
