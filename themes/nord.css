@@ -54,6 +54,7 @@ window#wafflebar {
 .statustray { padding: 0 4px; }
 .tray-item { padding: 0 3px; border-radius: 4px; }
 .tray-item:hover { background-color: #3b4252; }
+.tray-item.needs-attention { background-color: #bf616a; } /* SNI NeedsAttention */
 
 /* cpu: aggregate load percent; bucket classes tint as it climbs */
 .cpu { padding: 0 6px; }
