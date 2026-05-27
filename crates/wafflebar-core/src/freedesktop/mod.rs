@@ -39,6 +39,14 @@ pub struct DesktopApp {
     pub file_id: String,
     pub name: String,
     pub icon: Option<String>,
+    /// `GenericName=` (e.g. "Web Browser") — searched, and shown as a subtitle in the apps menu.
+    pub generic_name: Option<String>,
+    /// `Keywords=` — extra search terms not shown to the user.
+    pub keywords: Vec<String>,
+    /// `Comment=` (tooltip text) — also searched.
+    pub comment: Option<String>,
+    /// `Categories=` — the freedesktop categories, used to bucket the app in the menu (E).
+    pub categories: Vec<String>,
     pub actions: Vec<DesktopAction>,
     exec: Option<String>,
     dbus_activatable: bool,
@@ -115,12 +123,36 @@ impl DesktopApp {
                 .map(|c| c.to_string())
                 .unwrap_or_else(|| file_id.clone()),
             icon: entry.icon().map(str::to_string),
+            generic_name: entry.generic_name(locales).map(|c| c.to_string()),
+            keywords: entry
+                .keywords(locales)
+                .map(|ks| ks.iter().map(|k| k.to_string()).collect())
+                .unwrap_or_default(),
+            comment: entry.comment(locales).map(|c| c.to_string()),
+            categories: entry
+                .categories()
+                .map(|cs| cs.iter().map(|c| c.to_string()).collect())
+                .unwrap_or_default(),
             exec: entry.exec().map(str::to_string),
             dbus_activatable: entry.dbus_activatable(),
             actions,
             path,
             file_id,
         })
+    }
+
+    /// Whether this app matches a search query — case-insensitive substring over name, generic
+    /// name, keywords, and comment (the fields a user would search by). `query` is matched as-is;
+    /// callers lowercase it once. Empty query matches everything.
+    pub fn matches(&self, query_lower: &str) -> bool {
+        if query_lower.is_empty() {
+            return true;
+        }
+        let hit = |s: &str| s.to_lowercase().contains(query_lower);
+        hit(&self.name)
+            || self.generic_name.as_deref().is_some_and(hit)
+            || self.comment.as_deref().is_some_and(hit)
+            || self.keywords.iter().any(|k| hit(k))
     }
 
     /// Build a launch intent for the app (or one of its `Actions=`), passing `files`.
@@ -299,9 +331,43 @@ fn show_in_current_desktop(entry: &DesktopEntry) -> bool {
 }
 
 #[cfg(test)]
+impl DesktopApp {
+    /// Minimal app for tests in this crate (e.g. menu categorization): just a name and categories.
+    pub(crate) fn test(name: &str, categories: &[&str]) -> Self {
+        DesktopApp {
+            path: String::new(),
+            file_id: name.to_lowercase(),
+            name: name.to_string(),
+            icon: None,
+            generic_name: None,
+            keywords: Vec::new(),
+            comment: None,
+            categories: categories.iter().map(|s| s.to_string()).collect(),
+            actions: Vec::new(),
+            exec: None,
+            dbus_activatable: false,
+        }
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use std::path::PathBuf;
+
+    #[test]
+    fn matches_searches_name_generic_keywords_comment() {
+        let mut app = DesktopApp::test("Firefox", &["Network"]);
+        app.generic_name = Some("Web Browser".into());
+        app.keywords = vec!["internet".into()];
+        app.comment = Some("Browse the web".into());
+        assert!(app.matches("fire")); // name
+        assert!(app.matches("browser")); // generic name
+        assert!(app.matches("internet")); // keyword
+        assert!(app.matches("web")); // comment
+        assert!(app.matches(""), "empty query matches all");
+        assert!(!app.matches("spreadsheet"));
+    }
 
     fn parse(input: &str, locales: &[&str]) -> DesktopEntry {
         DesktopEntry::from_str(PathBuf::from("/t/app.desktop"), input, Some(locales))
