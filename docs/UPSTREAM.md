@@ -300,6 +300,11 @@ GTK input injection — `(Pane, search_empty, NavKey) -> KeyAction`, the GTK con
 the event, calls it, and applies the action). The throughline: the integration target resisting
 direct testing is the signal to separate decision from I/O, not to skip the test.
 
+A GTK detail from E3 worth keeping: **keyboard-nav controllers on a multi-widget popover must use
+capture phase** (`set_propagation_phase(Capture)`) to decide routing *before* a focused `ListBox`'s
+built-in nav fires. Bubble phase is too late — the ListBox has already moved its selection. Return
+`Proceed` for the keys you don't handle so native editing (text cursor, insert) still works.
+
 ## Roadmap (phases, each tied to a real directory)
 - **A** finish M2 — `tasklist` (this PR).
 - **B** plugin framework — `Plugin::configure` (per-instance TOML + `notify` live-reload), `launcher`, `separator`/`showdesktop`.
