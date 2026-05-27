@@ -52,7 +52,9 @@ impl Plugin for Tags {
                 if t.focused {
                     tag = tag.with_class("focused");
                 }
+                // Key by tag index so switching active only updates the two affected buttons.
                 tag.button(ActionId::new(format!("tag:{}", t.index)))
+                    .with_key(format!("tag:{}", t.index))
             })
             .collect();
         View::row(buttons, 2).with_class("tags")
@@ -60,7 +62,10 @@ impl Plugin for Tags {
 
     fn on_event(&mut self, ev: &Event) -> Reaction {
         if let Event::Wm(WmEvent::Tags { output, tags }) = ev {
-            if *output == self.output {
+            // Only dirty on an actual change: dwl re-emits tag state on many triggers (frame,
+            // focus activity) with identical contents; rebuilding on every one is wasted work the
+            // full-rebuild path used to mask (and a keyed diff would still walk the tree for).
+            if *output == self.output && *tags != self.tags {
                 self.tags = tags.clone();
                 return Reaction::dirty();
             }
