@@ -96,6 +96,15 @@ broken), which is worse than a 0%-done *feature gap* (users know it's absent). E
 architectural unknown is blocking, or the new surface is on a deadline. (D2c finished statustray
 before opening E/F/G.)
 
+The principle applies when the unfinished piece would **degrade silently** or **block a downstream
+consumer**. *Documented, rare, architecturally-bounded* limitations are a different shape and are
+tolerable across a milestone boundary — defer them when a higher-leverage milestone is ready. (F2b
+left three backend-class edits — first-add / last-remove of volume/network/tray — applying-with-a-warn
+rather than live; each is explicit, rare, and bounded to the F2c rewireable-sinks change, so F3
+[preferences UI, unblocks per-plugin config for *every* plugin] was taken before F2c. Contrast F2→F2b,
+where "structural edits warn restart" was a silent half-promise of the live-reload feature and so
+*did* lean finish-first.)
+
 ## Pay down accumulating debt before adding components
 When a *class* of debt is accumulating across multiple components, paying it down outranks adding new
 components — even when the new ones are individually more exciting. Adding components before the
@@ -178,6 +187,15 @@ conventional shape assume?" F2b's note set out to add `Plugin::teardown`-as-clea
 conventional shape: plugins own their backends) and the read proved the opposite (the invariant forbids
 it; resources are host-level). Default to *read first, then propose findings that contradict the
 framing when the code supports them* — not *read the framing, then validate it*.
+
+## Testing under GTK
+Tests that initialize GTK must be merged into **one `#[test]` fn per test binary**: libtest gives each
+test its own thread, GTK binds init to the first thread that calls it, and a second init panics
+("Attempted to initialize GTK from two different threads") — even under `--test-threads=1`. So either
+fold all GTK-touching asserts into a single self-skipping fn (the `renderer_gtk_behaviors` pattern,
+which also covers the B3 separator/popover asserts), or keep the test **GTK-free** by exercising the
+logic below the widget layer (F2b's `timer_reconciliation` drives the timer diff against a slot-less
+host — GLib timers need only a main context, not a display).
 
 ## Roadmap (phases, each tied to a real directory)
 - **A** finish M2 — `tasklist` (this PR).
