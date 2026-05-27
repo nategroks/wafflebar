@@ -121,6 +121,29 @@ config struct would break `Box<dyn Plugin>`) and host-rendered schema-driven set
 M2 call that no GTK type crosses the plugin boundary. Resist "just let plugins build their own
 dialogs" during F3 — it would break the v1→v2 isolation that the whole architecture rests on.
 
+## Preferences UI (F3) — three shape rules
+**Schema is declarative — describes fields, not values.** `config_schema()` returns field
+descriptions (key/label/kind/static-default), never a current-value snapshot. Current values live in
+the TOML; the host reads them per-key to populate a form and writes them per-key on edit. Plugins
+never hold or expose current config values across the trait boundary — the TOML is the single source
+of truth, read at `configure()` time. (A value-in-the-field design would create two sources — the
+plugin's internal value and the TOML's — that drift; reading/writing both directions through the TOML
+removes the synchronization entirely. Same isolation discipline as `configure()` returning a
+`Reaction` and `View` carrying no widgets, applied one level deeper.)
+
+**One settings window, because the host owns all forms.** xfce4-panel spawns N windows (one
+per-plugin dialog) because each dialog is *owned by its plugin*. Our forms are host-rendered from
+schema, so they fold into a single master-detail window (target list + the selected target's form).
+That's the v1→v2 isolation paying a UX dividend, not a divergence to be defensive about.
+
+**The UI writes TOML and lets the watcher drive reload.** A field edit writes the value back to the
+file (via `toml_edit`, preserving comments/order) and stops — it does **not** apply the change
+itself. The existing file-watch reload (F2/F2b) picks it up via `configure()` or a structural rebuild.
+One code path for UI-edit and hand-edit; no separate apply pipeline, no in-memory overlay, no
+double-apply. The bar config (`[bar]`) is described by a host-owned schema (not a plugin) and rendered
+through the same pipeline; its edits persist but apply on restart (anchors/zone/CSS are fixed at
+window creation), surfaced by an honest footer rather than a hidden half-working path.
+
 ## Defer optimizations until the architecture demonstrably fails
 Optimizations are deferred until the architecture demonstrably fails to prevent the load case they
 target. The reducer-diff-keyed pipeline prevents most redundant work *by construction* (value-compare
