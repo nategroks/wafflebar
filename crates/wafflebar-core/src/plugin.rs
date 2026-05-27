@@ -8,6 +8,7 @@
 
 use crate::audio::{VolumeCommand, VolumeEvent};
 use crate::freedesktop::Launch;
+use crate::net::NetworkState;
 use crate::view::{ActionId, View};
 use crate::wm::WmCommand;
 use serde::{Deserialize, Serialize};
@@ -23,6 +24,9 @@ pub enum Topic {
     /// Audio (default-sink volume/mute) changes. The host starts the audio backend only if some
     /// plugin subscribes to this.
     Audio,
+    /// Network (primary-connection) changes. The host starts the network backend only if some
+    /// plugin subscribes to this.
+    Network,
 }
 
 /// An event delivered to a subscribed module.
@@ -34,6 +38,8 @@ pub enum Event {
     Tick { secs: u32 },
     /// An audio state change from the host's audio backend.
     Volume(VolumeEvent),
+    /// A network state change from the host's network backend.
+    Network(NetworkState),
 }
 
 /// A module's response to an event or action: whether its view changed, plus any side effects
