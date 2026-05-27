@@ -195,6 +195,8 @@ fn build_grid_and_host(
     }
 
     // Backend capabilities (queried once) handed to every plugin at construction.
+    // Queried once at backend init. If a future backend has dynamic capabilities, lift this to a
+    // WmEvent::CapsChanged.
     let caps = plugins::Caps {
         show_desktop: backend
             .as_ref()
@@ -221,6 +223,7 @@ fn build_grid_and_host(
             kind: placement.kind.clone(),
             module,
             container,
+            last_view: None,
         });
     }
 

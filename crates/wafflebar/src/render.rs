@@ -5,13 +5,16 @@
 //! receive `Event`s/`ActionId`s. See `docs/ARCHITECTURE.md` (v1→v2 isolation).
 
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use gtk4::prelude::*;
 use gtk4::{gdk, GestureClick, Orientation, Popover, Separator};
 use tracing::debug;
+use wafflebar_core::reconcile::child_key;
 use wafflebar_core::{
-    ActionId, Event, Launch, MenuItem, Plugin, Reaction, SeparatorStyle, Topic, View, WmCommand,
+    diff_children, ActionId, ChildPatch, Event, Launch, ListPatch, MenuItem, Plugin, Reaction,
+    SeparatorStyle, Topic, View, WmCommand,
 };
 
 /// One placed module: its kind (for logging), the boxed reducer, and the host-owned container
@@ -20,6 +23,9 @@ pub struct PluginSlot {
     pub kind: String,
     pub module: Box<dyn Plugin>,
     pub container: gtk4::Box,
+    /// The last `View` rendered into `container`, kept so the next update can be reconciled against
+    /// it (keyed diff) instead of rebuilt wholesale. `None` before the first render.
+    pub last_view: Option<View>,
 }
 
 /// Owns all module slots and the command sink, and drives rendering + action routing.
@@ -110,28 +116,111 @@ impl Host {
         }
     }
 
-    /// Rebuild a slot's widget subtree from its current `View`.
+    /// Reconcile a slot's widget subtree against its new `View` via a keyed diff: only the nodes
+    /// whose data actually changed are rebuilt; unchanged siblings keep their existing widgets.
     fn rerender(self: &Rc<Self>, slot: usize) {
-        // Snapshot the view + container handle, then drop the borrow before building widgets.
-        let (view, container, kind) = {
-            let slots = self.slots.borrow();
+        // Snapshot the new view, take the previous one, grab the container — then drop the borrow
+        // before touching widgets (render closures re-enter the host, so we must not hold it).
+        let (new_view, old_view, container, kind) = {
+            let mut slots = self.slots.borrow_mut();
             if slot >= slots.len() {
                 return;
             }
+            let s = &mut slots[slot];
             (
-                slots[slot].module.view(),
-                slots[slot].container.clone(),
-                slots[slot].kind.clone(),
+                s.module.view(),
+                s.last_view.take(),
+                s.container.clone(),
+                s.kind.clone(),
             )
         };
-        debug!(slot, kind, "rerender module subtree");
-        // PERF: full subtree rebuild on every dirty update. Fine for v1 (per-module, low rate);
-        // replace with a keyed diff before a >10Hz module lands (M3 CPU graph is the first).
-        while let Some(child) = container.first_child() {
-            container.remove(&child);
-        }
-        container.append(&render_view(&view, slot, self));
+
+        // The slot container holds the single root view; model it as a one-element child list so
+        // the same keyed diff handles both the root and every nested container.
+        let old_slice = old_view.as_slice();
+        let new_slice = std::slice::from_ref(&new_view);
+        let patch = diff_children(old_slice, new_slice);
+        let ops = patch.counts();
+        debug!(
+            slot, kind,
+            creates = ops.creates, updates = ops.updates, destroys = ops.destroys,
+            "reconcile"
+        );
+        apply_children(&container, old_slice, new_slice, &patch, slot, self);
+
+        self.slots.borrow_mut()[slot].last_view = Some(new_view);
     }
+}
+
+/// Children of a container view (empty for non-containers) — the slice the keyed diff recurses on.
+fn container_children(view: &View) -> &[View] {
+    match view {
+        View::Row { children, .. } | View::Col { children, .. } => children,
+        _ => &[],
+    }
+}
+
+/// Apply a [`ListPatch`] to `parent`'s children: reuse kept/recursed widgets (re-packed in the new
+/// order), rebuild updated/created ones, and drop the rest. `old`/`new` are the child views the
+/// patch was computed from; `parent`'s current children correspond 1:1 to `old`.
+fn apply_children(
+    parent: &gtk4::Box,
+    old: &[View],
+    new: &[View],
+    patch: &ListPatch,
+    slot: usize,
+    host: &Rc<Host>,
+) {
+    // Collect the current widgets in order; they line up with `old`.
+    let mut old_widgets = Vec::with_capacity(old.len());
+    let mut cur = parent.first_child();
+    while let Some(w) = cur {
+        cur = w.next_sibling();
+        old_widgets.push(w);
+    }
+
+    // If reality and our cached view ever disagree, fall back to a clean full rebuild rather than
+    // mis-pairing widgets. (Shouldn't happen — rendering is the only mutator — but cheap insurance.)
+    if old_widgets.len() != old.len() || patch.children.len() != new.len() {
+        for w in &old_widgets {
+            parent.remove(w);
+        }
+        for nv in new {
+            parent.append(&render_view(nv, slot, host));
+        }
+        return;
+    }
+
+    // Detach everything (we keep refs in `old_widgets`), then re-append in the new order.
+    for w in &old_widgets {
+        parent.remove(w);
+    }
+    let by_key: HashMap<String, (gtk4::Widget, &View)> = old
+        .iter()
+        .enumerate()
+        .map(|(i, v)| (child_key(v, i), (old_widgets[i].clone(), v)))
+        .collect();
+
+    for (i, nv) in new.iter().enumerate() {
+        let nk = child_key(nv, i);
+        match &patch.children[i] {
+            ChildPatch::Keep => {
+                parent.append(&by_key[&nk].0);
+            }
+            ChildPatch::Recurse(sub) => {
+                let (w, ov) = &by_key[&nk];
+                if let Some(b) = w.downcast_ref::<gtk4::Box>() {
+                    apply_children(b, container_children(ov), container_children(nv), sub, slot, host);
+                }
+                parent.append(w);
+            }
+            ChildPatch::Update | ChildPatch::Create => {
+                parent.append(&render_view(nv, slot, host));
+            }
+        }
+    }
+    // Widgets whose keys weren't re-appended are dropped when `old_widgets`/`by_key` fall out of
+    // scope here — that's the "destroy" half of the diff.
 }
 
 /// Render a `View` to a GTK widget. `slot` is baked into any button closures so actions route
@@ -161,7 +250,7 @@ pub fn render_view(view: &View, slot: usize, host: &Rc<Host>) -> gtk4::Widget {
         View::Col { children, gap, classes } => {
             container(Orientation::Vertical, *gap, children, classes, slot, host)
         }
-        View::Button { child, action, classes, menu } => {
+        View::Button { child, action, classes, menu, key: _ } => {
             let b = gtk4::Box::new(Orientation::Horizontal, 0);
             b.append(&render_view(child, slot, host));
             add_classes(&b, classes);
@@ -294,7 +383,8 @@ mod tests {
     #[test]
     fn separator_expand_is_honored_by_renderer() {
         if !gtk_ready() {
-            return; // no display — nothing to assert against
+            eprintln!("separator renderer test skipped: no GTK display");
+            return; // self-skip rather than fail in a headless CI
         }
         let h = host();
         // expand flag maps to GTK hexpand (which is what makes it fill / share space).
