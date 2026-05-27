@@ -264,7 +264,7 @@ fn build_grid_and_host(
         None => Box::new(|_| {}),
     };
 
-    let host = Host::new(slots, command_sink, launch_sink, volume_sink);
+    let host = Host::new(slots, command_sink, launch_sink, volume_sink, config.bar.position);
 
     // Forward audio events into the host. `Weak` breaks the host → volume_sink → backend →
     // handler → host cycle.
