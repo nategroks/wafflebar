@@ -36,12 +36,22 @@ pub fn build_bars(
     config: &Config,
     engine: &GridEngine,
     config_path: Option<&std::path::Path>,
+    replace_notifications: bool,
 ) {
     let Some(display) = gdk::Display::default() else {
         warn!("no GDK display; cannot create bars");
         return;
     };
     load_css(&display, config.bar.theme.as_deref());
+
+    // Notification server (G1a) — session-wide, started once per process (not per monitor). G1a
+    // logs received notifications; G1b renders them as popups.
+    crate::notify::start(replace_notifications, |op| match op {
+        crate::notify::ServerOp::Post(n) => {
+            info!(id = n.id, app = %n.app_name, summary = %n.summary, "notification received")
+        }
+        crate::notify::ServerOp::Close(id) => info!(id, "notification close requested"),
+    });
 
     // One Wayland backend connection, shared across bars. None on non-dwl sessions (the bar
     // still runs; WM-driven modules just stay empty).

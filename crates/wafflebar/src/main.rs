@@ -8,6 +8,7 @@ mod app;
 mod config_reload;
 mod event_loop;
 mod menu;
+mod notify;
 mod plugins;
 mod prefs;
 mod render;
@@ -33,6 +34,9 @@ struct Cli {
     /// Path to a config file (default: $XDG_CONFIG_HOME/wafflebar/config.toml).
     #[arg(short, long, value_name = "FILE")]
     config: Option<PathBuf>,
+    /// Take over `org.freedesktop.Notifications` from an existing daemon (mako, dunst, …).
+    #[arg(long)]
+    replace_notifications: bool,
 }
 
 fn main() -> Result<()> {
@@ -58,9 +62,10 @@ fn main() -> Result<()> {
         "layout validated"
     );
 
+    let replace_notifications = cli.replace_notifications;
     let app = Application::builder().application_id(APP_ID).build();
     app.connect_activate(move |app| {
-        app::build_bars(app, &config, &engine, config_path.as_deref());
+        app::build_bars(app, &config, &engine, config_path.as_deref(), replace_notifications);
     });
 
     // We parse our own args with clap, so don't let GTK touch argv.
