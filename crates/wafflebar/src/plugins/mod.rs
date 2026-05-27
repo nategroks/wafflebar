@@ -6,6 +6,7 @@
 
 pub mod clock;
 pub mod dwl;
+pub mod launcher;
 pub mod tasklist;
 
 use wafflebar_core::{ActionId, Event, ModuleConfig, Plugin, Reaction, Topic, View};
@@ -23,6 +24,7 @@ pub fn build(kind: &str, output: &str, cfg: &ModuleConfig) -> Box<dyn Plugin> {
             output,
             cfg.opt_i64("max_chars").unwrap_or(0).max(0) as usize,
         )),
+        "launcher" => Box::new(launcher::Launcher::new(cfg)),
         other => Box::new(Placeholder::new(other)),
     }
 }

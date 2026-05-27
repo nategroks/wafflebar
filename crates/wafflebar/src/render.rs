@@ -8,9 +8,9 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use gtk4::prelude::*;
-use gtk4::{GestureClick, Orientation};
+use gtk4::{gdk, GestureClick, Orientation, Popover, Separator};
 use tracing::debug;
-use wafflebar_core::{ActionId, Event, Plugin, Reaction, Topic, View, WmCommand};
+use wafflebar_core::{ActionId, Event, Launch, MenuItem, Plugin, Reaction, Topic, View, WmCommand};
 
 /// One placed module: its kind (for logging), the boxed reducer, and the host-owned container
 /// widget whose child is rebuilt on every dirty update.
@@ -25,13 +25,20 @@ pub struct Host {
     slots: RefCell<Vec<PluginSlot>>,
     /// Where `WmCommand`s go (wired by the binary to the active backend's `execute`).
     command_sink: Box<dyn Fn(&WmCommand)>,
+    /// Where `Launch` intents go (wired to the shell executor: DBus activation or spawn).
+    launch_sink: Box<dyn Fn(&Launch)>,
 }
 
 impl Host {
-    pub fn new(slots: Vec<PluginSlot>, command_sink: Box<dyn Fn(&WmCommand)>) -> Rc<Self> {
+    pub fn new(
+        slots: Vec<PluginSlot>,
+        command_sink: Box<dyn Fn(&WmCommand)>,
+        launch_sink: Box<dyn Fn(&Launch)>,
+    ) -> Rc<Self> {
         Rc::new(Self {
             slots: RefCell::new(slots),
             command_sink,
+            launch_sink,
         })
     }
 
@@ -93,6 +100,9 @@ impl Host {
         for argv in &reaction.spawn {
             spawn(argv);
         }
+        for intent in &reaction.launch {
+            (self.launch_sink)(intent);
+        }
         if reaction.dirty {
             self.rerender(slot);
         }
@@ -149,18 +159,29 @@ pub fn render_view(view: &View, slot: usize, host: &Rc<Host>) -> gtk4::Widget {
         View::Col { children, gap, classes } => {
             container(Orientation::Vertical, *gap, children, classes, slot, host)
         }
-        View::Button { child, action, classes } => {
+        View::Button { child, action, classes, menu } => {
             let b = gtk4::Box::new(Orientation::Horizontal, 0);
             b.append(&render_view(child, slot, host));
             add_classes(&b, classes);
             b.add_css_class("wb-button");
-            let gesture = GestureClick::new();
-            let host = host.clone();
-            let action = action.clone();
-            gesture.connect_released(move |_, _, _, _| {
-                host.dispatch_action(slot, &action);
-            });
-            b.add_controller(gesture);
+            // Left-click → primary action.
+            let left = GestureClick::new();
+            left.set_button(gdk::BUTTON_PRIMARY);
+            {
+                let host = host.clone();
+                let action = action.clone();
+                left.connect_released(move |_, _, _, _| host.dispatch_action(slot, &action));
+            }
+            b.add_controller(left);
+            // Right-click → context menu popover (when the plugin supplied one).
+            if !menu.is_empty() {
+                let popover = build_menu(menu, slot, host);
+                popover.set_parent(&b);
+                let right = GestureClick::new();
+                right.set_button(gdk::BUTTON_SECONDARY);
+                right.connect_pressed(move |_, _, _, _| popover.popup());
+                b.add_controller(right);
+            }
             b.upcast()
         }
         // v1: popover content is unused (no v1 module emits Popover); render the trigger.
@@ -183,6 +204,33 @@ fn container(
     }
     add_classes(&b, classes);
     b.upcast()
+}
+
+/// Build the right-click context-menu popover. Items keep the plugin's order (no re-sorting).
+fn build_menu(menu: &[MenuItem], slot: usize, host: &Rc<Host>) -> Popover {
+    let popover = Popover::new();
+    let vbox = gtk4::Box::new(Orientation::Vertical, 0);
+    vbox.add_css_class("wb-menu");
+    for item in menu {
+        match item {
+            MenuItem::Separator => vbox.append(&Separator::new(Orientation::Horizontal)),
+            MenuItem::Item { label, action } => {
+                let btn = gtk4::Button::with_label(label);
+                btn.add_css_class("flat");
+                btn.add_css_class("wb-menu-item");
+                let host = host.clone();
+                let action = action.clone();
+                let popover_ref = popover.clone();
+                btn.connect_clicked(move |_| {
+                    host.dispatch_action(slot, &action);
+                    popover_ref.popdown();
+                });
+                vbox.append(&btn);
+            }
+        }
+    }
+    popover.set_child(Some(&vbox));
+    popover
 }
 
 fn add_classes(w: &impl IsA<gtk4::Widget>, classes: &[String]) {

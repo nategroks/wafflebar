@@ -11,7 +11,9 @@ use gtk4::prelude::*;
 use gtk4::{Application, ApplicationWindow, CssProvider, Grid, Orientation};
 use gtk4_layer_shell::{Edge, Layer, LayerShell};
 use tracing::{debug, info, warn};
-use wafflebar_core::{Align, Config, Event, GridEngine, Position, WindowManager, WmCommand};
+use wafflebar_core::{
+    Align, Config, Event, GridEngine, Launch, Position, WindowManager, WmCommand,
+};
 
 use crate::plugins;
 use crate::render::{Host, PluginSlot};
@@ -221,7 +223,10 @@ fn build_grid_and_host(
         Some(b) => Box::new(move |cmd| b.borrow_mut().execute(cmd)),
         None => Box::new(|_| {}),
     };
-    Host::new(slots, command_sink)
+    // Launch intents flow to the shell executor (DBus activation, falling back to spawn).
+    let executor = crate::shell::executor::Executor::real();
+    let launch_sink: Box<dyn Fn(&Launch)> = Box::new(move |intent| executor.execute(intent));
+    Host::new(slots, command_sink, launch_sink)
 }
 
 fn apply_align(widget: &impl IsA<gtk4::Widget>, align: Align) {
