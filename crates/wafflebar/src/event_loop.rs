@@ -40,6 +40,9 @@ extern "C" {
 ///
 /// `_local` (non-`Send` closure) is sound here because the GLib main loop is single-threaded and we
 /// only ever register on it from the main thread.
+///
+/// TODO(C3): replace with the safe `glib::source::unix_fd_add_local` once glib-rs exposes it
+/// (moving toward it past 0.22). Revisit on the next routine glib bump — don't bump for this alone.
 pub fn add_fd_watch_local<F>(fd: RawFd, callback: F) -> SourceId
 where
     F: FnMut() -> ControlFlow + 'static,
