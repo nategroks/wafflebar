@@ -5,7 +5,7 @@
 //! commands, exactly like the audio/network split. v1 (D2a) carries what an icon button needs;
 //! menus (DBusMenu), pixmap icons, scroll, and attention/overlay icons land in D2b/D2c.
 
-use crate::view::MenuItem;
+use crate::view::{MenuItem, Pixmap};
 use serde::{Deserialize, Serialize};
 
 /// SNI `Status`. `Passive` items are hidden (the spec's "available but not shown"); `Active` and
@@ -31,9 +31,12 @@ pub struct TrayItem {
     pub key: String,
     pub id: String,
     pub title: String,
-    /// Themed icon name (`IconName`). `None` → the renderer shows a placeholder (pixmap icons are
-    /// D2c). Resolved through the GTK icon theme, honoring the item's `IconThemePath` if any.
+    /// Themed icon name (`IconName`), resolved through the GTK icon theme. Preferred when it
+    /// resolves; otherwise the host falls back to `icon_pixmap`, then a placeholder.
     pub icon_name: Option<String>,
+    /// Raw-image fallback from `IconPixmap` (best size selected, ARGB→RGBA swapped). `None` if the
+    /// item ships no pixmap.
+    pub icon_pixmap: Option<Pixmap>,
     pub status: TrayStatus,
     /// The item's context menu (DBusMenu), as flat top-level [`MenuItem`]s — empty if the item has
     /// no `Menu`. Each `Item`'s action is `menu:<key>:<dbusmenu-id>`, routed back to

@@ -32,7 +32,7 @@ use std::sync::{Arc, Mutex};
 use gtk4::glib;
 use tracing::{debug, warn};
 use wafflebar_core::view::{ActionId, MenuItem};
-use wafflebar_core::{TrayItem, TrayStatus};
+use wafflebar_core::{Pixmap, TrayItem, TrayStatus};
 use zbus::export::ordered_stream::OrderedStreamExt;
 use zbus::fdo::DBusProxy;
 use zbus::object_server::SignalEmitter;
@@ -219,6 +219,51 @@ fn parse_menu(layout: &Layout, key: &str, saw_submenu: &mut bool, saw_toggle: &m
     out
 }
 
+// ---- Icon pixmap (IconPixmap → Pixmap) ------------------------------------------------------
+
+/// The bar's tray icon size; pixmap selection targets this. (Configurable cadence/size is Phase F.)
+const TRAY_ICON_PX: u32 = 16;
+
+/// One `IconPixmap` entry: `(width, height, ARGB32 bytes)` — D-Bus type `(iiay)`.
+type RawPixmap = (i32, i32, Vec<u8>);
+
+/// Pick the best pixmap for `target`px: the largest whose width ≤ target (downscaling beats
+/// upscaling); if none fit, the smallest available. Skips malformed entries (non-positive dims or
+/// `len != w*h*4`). Mirrors xfce4-panel's selection.
+fn select_pixmap(pixmaps: &[RawPixmap], target: u32) -> Option<&RawPixmap> {
+    let valid = pixmaps.iter().filter(|(w, h, b)| {
+        *w > 0 && *h > 0 && b.len() == (*w as usize) * (*h as usize) * 4
+    });
+    // Largest width ≤ target.
+    let best_fit = valid
+        .clone()
+        .filter(|(w, _, _)| *w as u32 <= target)
+        .max_by_key(|(w, _, _)| *w);
+    // Else smallest available.
+    best_fit.or_else(|| valid.min_by_key(|(w, _, _)| *w))
+}
+
+/// SNI ships ARGB32 in network (big-endian) byte order → bytes are `[A,R,G,B]` per pixel. GdkPixbuf
+/// wants RGBA, so rotate each 4-byte group left by one: `[A,R,G,B]` → `[R,G,B,A]`.
+fn argb_to_rgba(argb: &[u8]) -> Vec<u8> {
+    let mut out = argb.to_vec();
+    for px in out.chunks_exact_mut(4) {
+        px.rotate_left(1);
+    }
+    out
+}
+
+/// Parse `IconPixmap` (`a(iiay)`) → the best-size [`Pixmap`] (RGBA), or `None` if absent/all bad.
+fn build_pixmap(value: &OwnedValue) -> Option<Pixmap> {
+    let pixmaps: Vec<RawPixmap> = Vec::try_from(value.clone()).ok()?;
+    let (w, h, argb) = select_pixmap(&pixmaps, TRAY_ICON_PX)?;
+    Some(Pixmap {
+        width: *w as u32,
+        height: *h as u32,
+        rgba: argb_to_rgba(argb),
+    })
+}
+
 // ---- Per-item main-thread state -------------------------------------------------------------
 
 struct ItemEntry {
@@ -400,6 +445,7 @@ async fn add_item(
                 id: String::new(),
                 title: String::new(),
                 icon_name: None,
+                icon_pixmap: None,
                 status: TrayStatus::Passive,
                 menu: Vec::new(),
             },
@@ -521,6 +567,7 @@ async fn refresh(
             id: get_str("Id").unwrap_or_default(),
             title: get_str("Title").unwrap_or_default(),
             icon_name: get_str("IconName"),
+            icon_pixmap: props.get("IconPixmap").and_then(build_pixmap),
             status,
             menu: entry.item.menu.clone(), // preserve the DBusMenu-fetched menu
         };
@@ -668,6 +715,42 @@ mod tests {
         assert_eq!(
             parse_service("/org/ayatana/NotificationItem/nm_applet", ":1.77"),
             (":1.77".to_string(), "/org/ayatana/NotificationItem/nm_applet".to_string())
+        );
+    }
+
+    #[test]
+    fn pixmap_size_selection() {
+        let px = |w: i32| (w, w, vec![0u8; (w * w * 4) as usize]);
+        let set = [px(16), px(22), px(64)];
+        // Largest that fits 24 → 22.
+        assert_eq!(select_pixmap(&set, 24).unwrap().0, 22);
+        // None ≤ 12 → smallest available → 16.
+        assert_eq!(select_pixmap(&set, 12).unwrap().0, 16);
+        // Exact fit.
+        assert_eq!(select_pixmap(&set, 64).unwrap().0, 64);
+    }
+
+    #[test]
+    fn pixmap_rejects_malformed_entries() {
+        // Bytes don't match w*h*4, zero dims → skipped; the one valid entry is chosen.
+        let set = [
+            (2, 2, vec![0u8; 7]),         // truncated
+            (0, 5, vec![0u8; 0]),         // zero width
+            (2, 2, vec![1u8; 16]),        // valid (2*2*4)
+        ];
+        let chosen = select_pixmap(&set, 16).unwrap();
+        assert_eq!((chosen.0, chosen.1), (2, 2));
+        assert!(select_pixmap(&[(2, 2, vec![0u8; 7])], 16).is_none(), "all-malformed → None");
+    }
+
+    #[test]
+    fn argb_to_rgba_swaps_byte_order() {
+        // One pixel ARGB = [0xAA, 0x11, 0x22, 0x33] → RGBA [0x11,0x22,0x33,0xAA].
+        assert_eq!(argb_to_rgba(&[0xAA, 0x11, 0x22, 0x33]), vec![0x11, 0x22, 0x33, 0xAA]);
+        // Two pixels, independent rotation.
+        assert_eq!(
+            argb_to_rgba(&[1, 2, 3, 4, 5, 6, 7, 8]),
+            vec![2, 3, 4, 1, 6, 7, 8, 5]
         );
     }
 

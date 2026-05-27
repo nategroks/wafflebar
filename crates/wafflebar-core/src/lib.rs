@@ -41,5 +41,5 @@ pub use net::NetworkState;
 pub use plugin::{Event, Plugin, Reaction, Topic};
 pub use reconcile::{diff_children, ChildPatch, ListPatch};
 pub use tray::{TrayCommand, TrayItem, TrayStatus};
-pub use view::{ActionId, MenuItem, SeparatorStyle, View};
+pub use view::{ActionId, MenuItem, Pixmap, SeparatorStyle, View};
 pub use wm::{Output, Tag, TagState, Window, WindowId, WindowManager, WmCommand, WmEvent};

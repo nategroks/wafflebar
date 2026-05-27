@@ -9,6 +9,17 @@
 
 use serde::{Deserialize, Serialize};
 
+/// A decoded raster image crossing the boundary: `width × height` **RGBA** bytes (row-major, 8 bits
+/// per channel, no padding). GTK-free — the host turns it into a `GdkPixbuf`. The SNI backend emits
+/// these for `IconPixmap` (after the ARGB→RGBA byte swap), as a fallback when `IconName` is unset
+/// or unthemed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Pixmap {
+    pub width: u32,
+    pub height: u32,
+    pub rgba: Vec<u8>,
+}
+
 /// Identifies an interactive element. Routed back to the owning module's
 /// [`Plugin::on_action`](crate::plugin::Plugin::on_action). Opaque + serializable on purpose.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -68,8 +79,11 @@ impl<T: Into<String>> From<T> for ActionId {
 pub enum View {
     /// A text label.
     Label { text: String, classes: Vec<String> },
-    /// An icon by freedesktop name (resolved against the host's GTK icon theme).
-    Icon { name: String, size: u32, classes: Vec<String> },
+    /// An icon by freedesktop `name` (resolved against the host's GTK icon theme), with an optional
+    /// raw-image fallback. The host uses `name` if it resolves in the theme; otherwise it renders
+    /// `pixmap` (e.g. an SNI tray item's `IconPixmap`); otherwise a placeholder. GTK-free: `pixmap`
+    /// is RGBA bytes, the host builds the actual `GdkPixbuf`.
+    Icon { name: String, size: u32, classes: Vec<String>, pixmap: Option<Pixmap> },
     /// A horizontal container.
     Row { children: Vec<View>, gap: u32, classes: Vec<String> },
     /// A vertical container.
@@ -125,7 +139,17 @@ impl View {
             name: name.into(),
             size,
             classes: Vec::new(),
+            pixmap: None,
         }
+    }
+
+    /// Attach a raw-image fallback used when `name` doesn't resolve in the theme (no-op unless
+    /// `self` is an `Icon`). For SNI tray items that ship `IconPixmap`.
+    pub fn with_pixmap(mut self, pixmap: Option<Pixmap>) -> View {
+        if let View::Icon { pixmap: p, .. } = &mut self {
+            *p = pixmap;
+        }
+        self
     }
 
     /// A horizontal row of children with a pixel gap.
