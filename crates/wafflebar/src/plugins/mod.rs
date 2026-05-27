@@ -6,8 +6,9 @@
 
 pub mod clock;
 pub mod dwl;
+pub mod tasklist;
 
-use wafflebar_core::{ActionId, Event, Plugin, ModuleConfig, Reaction, Topic, View};
+use wafflebar_core::{ActionId, Event, ModuleConfig, Plugin, Reaction, Topic, View};
 
 /// Construct a module for `kind`, bound to `output` (the bar's monitor) and `cfg`.
 pub fn build(kind: &str, output: &str, cfg: &ModuleConfig) -> Box<dyn Plugin> {
@@ -15,6 +16,10 @@ pub fn build(kind: &str, output: &str, cfg: &ModuleConfig) -> Box<dyn Plugin> {
         "clock" => Box::new(clock::Clock::new(cfg)),
         "tags" => Box::new(dwl::tags::Tags::new(output)),
         "window" => Box::new(dwl::window::Window::new(
+            output,
+            cfg.opt_i64("max_chars").unwrap_or(0).max(0) as usize,
+        )),
+        "tasklist" => Box::new(tasklist::Tasklist::new(
             output,
             cfg.opt_i64("max_chars").unwrap_or(0).max(0) as usize,
         )),

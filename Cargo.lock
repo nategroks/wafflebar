@@ -1205,6 +1205,7 @@ dependencies = [
  "tracing-subscriber",
  "wafflebar-core",
  "wayland-client",
+ "wayland-protocols-wlr",
  "wayland-scanner",
 ]
 
@@ -1285,6 +1286,31 @@ dependencies = [
  "bitflags",
  "rustix",
  "wayland-backend",
+ "wayland-scanner",
+]
+
+[[package]]
+name = "wayland-protocols"
+version = "0.32.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "563a85523cade2429938e790815fd7319062103b9f4a2dc806e9b53b95982d8f"
+dependencies = [
+ "bitflags",
+ "wayland-backend",
+ "wayland-client",
+ "wayland-scanner",
+]
+
+[[package]]
+name = "wayland-protocols-wlr"
+version = "0.3.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eb04e52f7836d7c7976c78ca0250d61e33873c34156a2a1fc9474828ec268234"
+dependencies = [
+ "bitflags",
+ "wayland-backend",
+ "wayland-client",
+ "wayland-protocols",
  "wayland-scanner",
 ]
 
