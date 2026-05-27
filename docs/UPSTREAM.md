@@ -89,6 +89,16 @@ future server-side surface (a Phase G notifications server, a Wafflebar control 
 the same shape: the GLib loop is the source of truth for stateful work; the zbus executor is a thin
 transport.
 
+## Defer optimizations until the architecture demonstrably fails
+Optimizations are deferred until the architecture demonstrably fails to prevent the load case they
+target. The reducer-diff-keyed pipeline prevents most redundant work *by construction* (value-compare
+suppresses unchanged events; the keyed diff reuses widgets for unchanged nodes), so caching on top of
+it is usually redundant — justify it against a *measured* failure mode, not an imagined one.
+Declined so far: the 20 Hz poll (already ~0% CPU; replaced in C3 only to reach true zero), the shared
+`PollingBackend<T>` (deferred at C1 — wrong abstraction until the third instance), and the tray
+pixbuf decode cache (the keyed diff already reuses the `Image` for unchanged icons, so identical
+bytes never re-decode).
+
 ## Dependency discipline
 When a transitive dependency already re-exports what you'd otherwise add directly, use the
 re-export. (Network consumes zbus's signal stream via `zbus::export::ordered_stream` rather than
