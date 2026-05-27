@@ -24,6 +24,7 @@ pub mod memory;
 pub mod net;
 pub mod plugin;
 pub mod reconcile;
+pub mod tray;
 pub mod view;
 pub mod wm;
 
@@ -39,5 +40,6 @@ pub use memory::MemoryState;
 pub use net::NetworkState;
 pub use plugin::{Event, Plugin, Reaction, Topic};
 pub use reconcile::{diff_children, ChildPatch, ListPatch};
+pub use tray::{TrayCommand, TrayItem, TrayStatus};
 pub use view::{ActionId, MenuItem, SeparatorStyle, View};
 pub use wm::{Output, Tag, TagState, Window, WindowId, WindowManager, WmCommand, WmEvent};
