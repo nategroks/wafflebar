@@ -77,8 +77,11 @@ impl Plugin for Tasklist {
                     ],
                     4,
                 );
+                // Key by toplevel id so closing/reordering a window reuses the other buttons
+                // instead of rebuilding the whole list.
                 let mut btn = content
                     .button(ActionId::new(format!("activate:{}", w.id)))
+                    .with_key(format!("win:{}", w.id))
                     .with_class("task");
                 if w.focused {
                     btn = btn.with_class("active");
@@ -98,8 +101,12 @@ impl Plugin for Tasklist {
 
     fn on_event(&mut self, ev: &Event) -> Reaction {
         if let Event::Wm(WmEvent::Windows { windows }) = ev {
-            self.windows = windows.clone();
-            return Reaction::dirty();
+            // Only dirty on an actual change (see tags.rs): foreign-toplevel re-emits the window
+            // list on unrelated activity; rebuilding when it's identical is wasted work.
+            if *windows != self.windows {
+                self.windows = windows.clone();
+                return Reaction::dirty();
+            }
         }
         Reaction::none()
     }
