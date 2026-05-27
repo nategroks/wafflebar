@@ -13,8 +13,8 @@ use gtk4::{gdk, GestureClick, Orientation, Popover, Separator};
 use tracing::debug;
 use wafflebar_core::reconcile::child_key;
 use wafflebar_core::{
-    diff_children, ActionId, ChildPatch, Event, Launch, ListPatch, MenuItem, Plugin, Reaction,
-    SeparatorStyle, Topic, View, VolumeCommand, WmCommand,
+    diff_children, ActionId, ChildPatch, Event, Launch, ListPatch, MenuItem, Plugin, Position,
+    Reaction, SeparatorStyle, Topic, View, VolumeCommand, WmCommand,
 };
 
 /// One placed module: its kind (for logging), the boxed reducer, and the host-owned container
@@ -37,6 +37,9 @@ pub struct Host {
     launch_sink: Box<dyn Fn(&Launch)>,
     /// Where `VolumeCommand`s go (wired to the audio backend, or a no-op when none is running).
     volume_sink: Box<dyn Fn(&VolumeCommand)>,
+    /// The bar's edge. Popovers open away from it (read at render time so a Phase F edge change is
+    /// picked up without a stale cached anchor).
+    position: Position,
 }
 
 impl Host {
@@ -45,12 +48,14 @@ impl Host {
         command_sink: Box<dyn Fn(&WmCommand)>,
         launch_sink: Box<dyn Fn(&Launch)>,
         volume_sink: Box<dyn Fn(&VolumeCommand)>,
+        position: Position,
     ) -> Rc<Self> {
         Rc::new(Self {
             slots: RefCell::new(slots),
             command_sink,
             launch_sink,
             volume_sink,
+            position,
         })
     }
 
@@ -336,10 +341,43 @@ pub fn render_view(view: &View, slot: usize, host: &Rc<Host>) -> gtk4::Widget {
             w.set_hexpand(*expand);
             w
         }
-        // v1: popover content is unused (no v1 module emits Popover); render the trigger.
-        // TODO(M3): wrap in a gtk::Popover and render `content` on demand.
-        View::Popover { trigger, .. } => render_view(trigger, slot, host),
+        View::Popover { trigger, content, classes } => {
+            build_popover(trigger, content, classes, slot, host).0
+        }
     }
+}
+
+/// Build a popover: the trigger widget (returned, with the popover parented to it) plus the
+/// `gtk::Popover` itself (returned for tests). Clicking the trigger pops it up; GTK's autohide
+/// (on by default) closes it — open/closed is GTK's concern, the reducer only owns the content.
+/// The popover opens away from the bar edge (derived from the host's position at render time).
+fn build_popover(
+    trigger: &View,
+    content: &View,
+    classes: &[String],
+    slot: usize,
+    host: &Rc<Host>,
+) -> (gtk4::Widget, Popover) {
+    let trigger_w = render_view(trigger, slot, host);
+
+    let popover = Popover::new();
+    popover.set_child(Some(&render_view(content, slot, host)));
+    popover.set_autohide(true);
+    popover.set_position(match host.position {
+        Position::Top => gtk4::PositionType::Bottom, // top bar → open downward
+        Position::Bottom => gtk4::PositionType::Top,  // bottom bar → open upward
+    });
+    add_classes(&popover, classes);
+    popover.set_parent(&trigger_w);
+
+    // Open on trigger click. Content/trigger actions still route via ActionId as usual.
+    let gesture = GestureClick::new();
+    gesture.set_button(gdk::BUTTON_PRIMARY);
+    let pop = popover.clone();
+    gesture.connect_released(move |_, _, _, _| pop.popup());
+    trigger_w.add_controller(gesture);
+
+    (trigger_w, popover)
 }
 
 fn container(
@@ -420,6 +458,7 @@ mod tests {
             Box::new(|_: &WmCommand| {}),
             Box::new(|_: &Launch| {}),
             Box::new(|_: &VolumeCommand| {}),
+            Position::Top,
         )
     }
 
@@ -427,23 +466,33 @@ mod tests {
         View::Separator { style, expand }
     }
 
+    // GTK widget creation is single-threaded (only the thread that called `gtk::init` may build
+    // widgets), so all GTK-touching assertions live in ONE test — `cargo test` runs tests on
+    // multiple threads, and separate GTK tests would race for the init thread and panic.
     #[test]
-    fn separator_expand_is_honored_by_renderer() {
+    fn renderer_gtk_behaviors() {
         if !gtk_ready() {
-            eprintln!("separator renderer test skipped: no GTK display");
+            eprintln!("renderer GTK test skipped: no GTK display");
             return; // self-skip rather than fail in a headless CI
         }
         let h = host();
-        // expand flag maps to GTK hexpand (which is what makes it fill / share space).
+
+        // --- Separator: `expand` maps to GTK hexpand (fills / shares space). ---
         assert!(render_view(&sep(SeparatorStyle::Line, true), 0, &h).hexpands());
         assert!(!render_view(&sep(SeparatorStyle::Transparent, false), 0, &h).hexpands());
-
-        // Two expanding separators in one row both hexpand → GTK shares the row proportionally.
         let row = gtk4::Box::new(Orientation::Horizontal, 0);
         let a = render_view(&sep(SeparatorStyle::Line, true), 0, &h);
         let b = render_view(&sep(SeparatorStyle::Line, true), 0, &h);
         row.append(&a);
         row.append(&b);
-        assert!(a.hexpands() && b.hexpands());
+        assert!(a.hexpands() && b.hexpands(), "two expanders share the row");
+
+        // --- Popover: built with autohide, content rendered + parented to the trigger. ---
+        let (trigger_w, popover) =
+            build_popover(&View::icon("x", 16), &View::label("menu item"), &[], 0, &h);
+        assert!(popover.is_autohide(), "GTK owns open/close; autohide closes without the reducer");
+        assert!(popover.child().is_some(), "content rendered through the same renderer");
+        assert_eq!(popover.parent().as_ref(), Some(&trigger_w));
+        assert_eq!(popover.position(), gtk4::PositionType::Bottom, "top bar → opens downward");
     }
 }

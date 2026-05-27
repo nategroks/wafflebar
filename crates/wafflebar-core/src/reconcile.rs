@@ -148,6 +148,10 @@ fn diff_node(old: &View, new: &View) -> ChildPatch {
             }
         }
         // Leaves (and Row-vs-Col / variant changes): unchanged → keep, otherwise rebuild this node.
+        // Note: `Button` and `Popover` are leaves here even though they carry child Views — their
+        // content is rebuilt on change, not finely reconciled into. For `Popover` this is cheap
+        // because popovers are typically closed; if a future consumer hosts a high-frequency widget
+        // in popover content, upgrade it to a recursed container with keyed-diff into the content.
         _ if old == new => ChildPatch::Keep,
         _ => ChildPatch::Update,
     }
@@ -219,6 +223,21 @@ mod tests {
         let new = [row(vec![entry(0, "a", false), entry(1, "b", false)])];
         let counts = diff_children(&old, &new).counts();
         assert_eq!(counts, Counts { creates: 1, updates: 0, destroys: 0 });
+    }
+
+    #[test]
+    fn popover_content_change_is_one_update() {
+        // Popover is a reconcile leaf: changing its content rebuilds the node (one Update), the
+        // leaf-reconcile path D1 relies on. (Popovers are usually closed; rebuild is cheap.)
+        let popover = |label: &str| View::Popover {
+            trigger: Box::new(View::icon("tray-item", 16)),
+            content: Box::new(View::label(label)),
+            classes: Vec::new(),
+        };
+        let old = [row(vec![popover("Open")])];
+        let new = [row(vec![popover("Close")])];
+        let counts = diff_children(&old, &new).counts();
+        assert_eq!(counts, Counts { creates: 0, updates: 1, destroys: 0 });
     }
 
     #[test]

@@ -39,6 +39,15 @@ X11/Wayland via WM hints).
 3. Mirror the *behavior* on our `Plugin` trait + `View` boundary.
 4. v1 implements the core; defer the rest with `// TODO(<plugin>): mirror …:<function>` markers.
 
+## Affordance discipline
+Affordances are designed when the *shape* becomes clear, not when the first consumer arrives.
+Exercising the affordance later validates the original design without forcing a substrate revision.
+Track record: the cached `wl_seat` in M2's dwl backend (added before tasklist's activate/close needed
+it), the `View::Popover` variant baked into the enum at M2 (no consumer then), and the seat/popover
+both paying off later — launcher shipped right-click menus in B2b with no substrate change, and that
+same launcher popover code retired Phase D's hardest risk (layer-shell + `gtk4::Popover` Wayland
+compatibility) before D research even started.
+
 ## Reducer discipline
 A plugin's `on_event` **must return `dirty=false` when its derived state is unchanged**, even if a
 `WmEvent` arrived. Compositors re-emit state (dwl re-sends `Tags`/`Windows` on frames and unrelated
