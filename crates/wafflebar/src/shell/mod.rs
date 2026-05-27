@@ -4,6 +4,7 @@
 //! `TODO(M4)`. The full designs live in `docs/ARCHITECTURE.md` (the tray especially).
 #![allow(dead_code)]
 
+pub mod executor;
 pub mod launcher;
 pub mod notifications;
 pub mod popups;

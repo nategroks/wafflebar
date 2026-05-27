@@ -34,3 +34,18 @@ window#wafflebar {
 .pulseaudio.muted { color: #bf616a; }
 .tags .occupied { color: #88c0d0; }
 .tags .urgent   { color: #bf616a; }
+
+/* launcher: icon buttons + right-click action menu */
+.launcher { padding: 0 4px; }
+.wb-launcher-button {
+    padding: 0 4px;
+    border-radius: 4px;
+}
+.wb-launcher-button:hover { background-color: #3b4252; }
+.wb-launcher-label { color: #d8dee9; }
+.wb-menu { padding: 4px; }
+.wb-menu-item {
+    padding: 4px 10px;
+    color: #d8dee9;
+}
+.wb-menu-item:hover { background-color: #434c5e; }
