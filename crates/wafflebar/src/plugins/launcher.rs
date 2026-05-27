@@ -124,13 +124,9 @@ impl Plugin for Launcher {
     }
 
     fn config_schema(&self) -> Vec<ConfigField> {
-        // The `items` list is a `.desktop` picker — that's F4's Add Items dialog, not an F3 form
-        // field. Surface the limitation and its closer rather than a half-built list editor.
-        vec![ConfigField::note(
-            "items",
-            "Items",
-            "Edit items in the config file — visual editing comes with Add Items.",
-        )]
+        // The items list is rendered by the host as an add/remove/reorder editor with a `.desktop`
+        // application picker (F4).
+        vec![ConfigField::desktop_list("items", "Items")]
     }
 }
 
@@ -180,7 +176,7 @@ fn resolve_item(item: &str) -> Option<DesktopApp> {
     } else {
         format!("{item}.desktop")
     };
-    for dir in xdg_application_dirs() {
+    for dir in wafflebar_core::application_dirs() {
         let path = dir.join(&id);
         if path.is_file() {
             if let Ok(Some(app)) = DesktopApp::load(&path) {
@@ -189,25 +185,6 @@ fn resolve_item(item: &str) -> Option<DesktopApp> {
         }
     }
     None
-}
-
-/// XDG `applications` dirs in lookup order: `$XDG_DATA_HOME` then `$XDG_DATA_DIRS` (spec defaults).
-fn xdg_application_dirs() -> Vec<std::path::PathBuf> {
-    use std::path::PathBuf;
-    let mut dirs = Vec::new();
-    let data_home = std::env::var_os("XDG_DATA_HOME")
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share")));
-    if let Some(h) = data_home {
-        dirs.push(h.join("applications"));
-    }
-    let data_dirs = std::env::var_os("XDG_DATA_DIRS")
-        .map(|v| v.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "/usr/local/share:/usr/share".to_string());
-    for d in data_dirs.split(':').filter(|s| !s.is_empty()) {
-        dirs.push(PathBuf::from(d).join("applications"));
-    }
-    dirs
 }
 
 #[cfg(test)]

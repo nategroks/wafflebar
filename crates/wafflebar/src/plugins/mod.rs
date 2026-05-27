@@ -44,6 +44,46 @@ pub fn build(kind: &str, output: &str, cfg: &ModuleConfig, caps: &Caps) -> Box<d
     }
 }
 
+/// Static metadata for a plugin kind, for the Add Items dialog (F4). Lives in the binary because the
+/// compiled-in plugin set is known at build time — plugins describe what they *are* statically;
+/// instances are dynamic. (Metadata is binary-time, not runtime — so it's not a `Plugin` trait
+/// method.)
+pub struct PluginInfo {
+    pub kind: &'static str,
+    pub name: &'static str,
+    /// Shown in the dialog. Backend-class kinds carry their F2c "needs a restart" caveat here so the
+    /// limitation is visible at the point of adding (the chosen shape over a confirmation dialog).
+    pub description: &'static str,
+    /// A freedesktop symbolic icon name; the picker falls back to a generic if it doesn't resolve.
+    pub icon: &'static str,
+    /// `true` for a kind that must not have a second instance. Currently only `statustray`, which
+    /// owns the SNI Watcher bus name — a second instance fails to acquire it and renders empty
+    /// (silent failure, so we prevent it). The per-output plugins (tags/window/showdesktop) are
+    /// *not* unique: a second instance on a different output is legitimate. TODO(prefs): a
+    /// `Uniqueness::PerOutput` scope if same-output duplicates prove confusing.
+    pub unique: bool,
+}
+
+/// Every addable plugin kind, in catalog order (what Add Items lists).
+pub fn catalog() -> Vec<PluginInfo> {
+    let info =
+        |kind, name, description, icon, unique| PluginInfo { kind, name, description, icon, unique };
+    vec![
+        info("clock", "Clock", "Date and time.", "preferences-system-time-symbolic", false),
+        info("launcher", "Launcher", "Pinned application shortcuts.", "applications-other-symbolic", false),
+        info("separator", "Separator", "Blank space, a line, or a grip; can expand to push items apart.", "view-list-symbolic", false),
+        info("tasklist", "Task list", "A button per open window.", "view-list-symbolic", false),
+        info("tags", "Tags", "Workspace / tag indicator (dwl).", "view-grid-symbolic", false),
+        info("window", "Window title", "Title of the focused window.", "window-new-symbolic", false),
+        info("showdesktop", "Show desktop", "Minimize all windows (where the compositor supports it).", "user-desktop-symbolic", false),
+        info("memory", "Memory", "RAM usage.", "utilities-system-monitor-symbolic", false),
+        info("cpu", "CPU", "Processor load.", "utilities-system-monitor-symbolic", false),
+        info("volume", "Volume", "Audio volume. Starting its backend needs a restart.", "audio-volume-medium-symbolic", false),
+        info("network", "Network", "Connection status. Starting its backend needs a restart.", "network-wireless-symbolic", false),
+        info("statustray", "System tray", "Status-notifier icons from running apps.", "preferences-system-notifications-symbolic", true),
+    ]
+}
+
 /// The config schema a module kind exposes to the preferences UI (F3). Builds a throwaway reducer
 /// with empty options — schemas are static (they describe fields, not values), so output/caps and
 /// the absent values don't affect the result — and returns its declared fields. Unknown kinds and
@@ -118,8 +158,8 @@ mod schema_tests {
         assert!(config_schema("memory")
             .iter()
             .any(|f| f.key == "interval" && matches!(f.kind, FieldKind::Int { .. })));
-        // Launcher's items are an app-picker (F4) → a Note placeholder, not an editable field.
-        assert!(matches!(config_schema("launcher")[0].kind, FieldKind::Note(_)));
+        // Launcher's items render as the F4 application-list editor.
+        assert!(matches!(config_schema("launcher")[0].kind, FieldKind::DesktopList));
 
         // Option-less and unknown kinds expose nothing.
         assert!(config_schema("volume").is_empty());
