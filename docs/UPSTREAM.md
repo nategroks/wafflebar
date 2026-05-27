@@ -290,6 +290,16 @@ which also covers the B3 separator/popover asserts), or keep the test **GTK-free
 logic below the widget layer (F2b's `timer_reconciliation` drives the timer diff against a slot-less
 host — GLib timers need only a main context, not a display).
 
+## Extract the decision from the I/O
+When interaction logic can't be tested against its integration target, **extract the decision into a
+pure function taking explicit `(state, input)` and returning an action; make the integration layer a
+thin translator.** The pure function gets exhaustive unit tests; the I/O layer stays small enough to
+verify by reading. Three instances: `FakeWm` (WindowManager logic without a real compositor),
+`Recents` internals (frecency without a clock or disk), and E3's `handle_key` (keyboard nav without
+GTK input injection — `(Pane, search_empty, NavKey) -> KeyAction`, the GTK controller just normalizes
+the event, calls it, and applies the action). The throughline: the integration target resisting
+direct testing is the signal to separate decision from I/O, not to skip the test.
+
 ## Roadmap (phases, each tied to a real directory)
 - **A** finish M2 — `tasklist` (this PR).
 - **B** plugin framework — `Plugin::configure` (per-instance TOML + `notify` live-reload), `launcher`, `separator`/`showdesktop`.
