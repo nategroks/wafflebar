@@ -194,11 +194,19 @@ fn build_grid_and_host(
         }
     }
 
+    // Backend capabilities (queried once) handed to every plugin at construction.
+    let caps = plugins::Caps {
+        show_desktop: backend
+            .as_ref()
+            .map(|b| b.borrow().supports_show_desktop())
+            .unwrap_or(false),
+    };
+
     // One host-owned container per placement; the module's View is rendered into it.
     let mut slots = Vec::with_capacity(engine.placements.len());
     for placement in &engine.placements {
         let mcfg = &config.modules[placement.index];
-        let module = plugins::build(&placement.kind, output, mcfg);
+        let module = plugins::build(&placement.kind, output, mcfg, &caps);
         let container = gtk4::Box::new(Orientation::Horizontal, 0);
         container.set_hexpand(true);
         apply_align(&container, placement.align);

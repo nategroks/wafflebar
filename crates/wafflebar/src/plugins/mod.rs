@@ -8,12 +8,20 @@ pub mod clock;
 pub mod dwl;
 pub mod launcher;
 pub mod separator;
+pub mod showdesktop;
 pub mod tasklist;
 
 use wafflebar_core::{ActionId, Event, ModuleConfig, Plugin, Reaction, Topic, View};
 
-/// Construct a module for `kind`, bound to `output` (the bar's monitor) and `cfg`.
-pub fn build(kind: &str, output: &str, cfg: &ModuleConfig) -> Box<dyn Plugin> {
+/// Backend capabilities handed to plugins at construction — things a plugin can't derive from its
+/// own config and that depend on which compositor is running (e.g. whether show-desktop works).
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Caps {
+    pub show_desktop: bool,
+}
+
+/// Construct a module for `kind`, bound to `output` (the bar's monitor), `cfg`, and backend `caps`.
+pub fn build(kind: &str, output: &str, cfg: &ModuleConfig, caps: &Caps) -> Box<dyn Plugin> {
     match kind {
         "clock" => Box::new(clock::Clock::new(cfg)),
         "tags" => Box::new(dwl::tags::Tags::new(output)),
@@ -27,6 +35,7 @@ pub fn build(kind: &str, output: &str, cfg: &ModuleConfig) -> Box<dyn Plugin> {
         )),
         "launcher" => Box::new(launcher::Launcher::new(cfg)),
         "separator" => Box::new(separator::Separator::new(cfg)),
+        "showdesktop" => Box::new(showdesktop::ShowDesktop::new(caps)),
         other => Box::new(Placeholder::new(other)),
     }
 }

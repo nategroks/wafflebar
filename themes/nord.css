@@ -50,6 +50,11 @@ window#wafflebar {
 }
 .wb-menu-item:hover { background-color: #434c5e; }
 
+/* show-desktop: a single toggle button; .active reflects the engaged state */
+.wb-showdesktop { padding: 0 4px; border-radius: 4px; }
+.wb-showdesktop:hover { background-color: #3b4252; }
+.wb-showdesktop.active { background-color: #434c5e; color: #88c0d0; }
+
 /* separator: blank space, a rule, a handle grip, or dots. Thickness/size are CSS, not config. */
 .wb-separator { margin: 4px 2px; }
 .wb-separator.transparent { /* nothing — pure (optionally expanding) space */ }

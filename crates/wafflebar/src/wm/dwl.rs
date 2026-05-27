@@ -237,9 +237,19 @@ impl WindowManager for DwlBackend {
                     }
                 }
             }
+            // Unreachable on dwl: supports_show_desktop() is false, so the showdesktop plugin
+            // renders nothing and never emits this. Routed for completeness via the trait method.
+            WmCommand::ToggleShowDesktop => self.toggle_show_desktop(),
         }
         // Flush after every command — the poll loop won't flush our requests for us.
         let _ = self.conn.flush();
+    }
+
+    // dwl has no "show desktop" concept — there is no _NET_SHOWING_DESKTOP equivalent and no
+    // dwl-ipc request for it. Reported false so the plugin hides itself; the trait extension is in
+    // place for sway/Hyprland backends, where it lights up for free.
+    fn supports_show_desktop(&self) -> bool {
+        false
     }
 }
 
