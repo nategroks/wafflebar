@@ -6,6 +6,7 @@
 
 mod app;
 mod config_reload;
+mod dropdown;
 mod event_loop;
 mod menu;
 mod notify;

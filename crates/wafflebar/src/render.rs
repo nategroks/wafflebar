@@ -445,12 +445,37 @@ pub fn render_view(view: &View, slot: usize, host: &Rc<Host>) -> gtk4::Widget {
             w
         }
         View::Popover { trigger, content, classes } => {
-            build_popover(trigger, content, classes, slot, host).0
+            // The apps-menu has a search box → it must be a standalone layer-shell dropdown (a
+            // GtkPopover can't get keyboard on dwl). Everything else stays a normal popover.
+            if matches!(**content, View::AppMenu { .. }) {
+                build_appmenu_dropdown(trigger, content, slot, host)
+            } else {
+                build_popover(trigger, content, classes, slot, host).0
+            }
         }
         View::AppMenu { favorites, show_recents, max_recents } => {
             crate::menu::build_appmenu(favorites, *show_recents, *max_recents, host)
         }
     }
+}
+
+/// The apps-menu opens as a standalone layer-shell **dropdown** (not a `GtkPopover`) so its search
+/// box can receive keyboard on dwl. The trigger button's click builds the menu fresh in a dropdown
+/// window each time; the menu closes the window on launch / Escape (see `crate::menu`).
+fn build_appmenu_dropdown(trigger: &View, content: &View, slot: usize, host: &Rc<Host>) -> gtk4::Widget {
+    let trigger_w = render_view(trigger, slot, host);
+    let gesture = GestureClick::new();
+    gesture.set_button(gdk::BUTTON_PRIMARY);
+    let content = content.clone();
+    let host = host.clone();
+    gesture.connect_released(move |_, _, _, _| {
+        let win = gtk4::Window::builder().default_width(420).default_height(520).build();
+        crate::dropdown::panel(&win);
+        win.set_child(Some(&render_view(&content, slot, &host)));
+        win.present();
+    });
+    trigger_w.add_controller(gesture);
+    trigger_w
 }
 
 /// Build a popover: the trigger widget (returned, with the popover parented to it) plus the

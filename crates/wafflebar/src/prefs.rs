@@ -19,36 +19,12 @@ use std::rc::Rc;
 use gtk4::glib;
 use gtk4::prelude::*;
 use gtk4::{
-    Align, Button, DropDown, Entry, EventControllerFocus, EventControllerKey, Image, Label, ListBox,
-    ListBoxRow, Orientation, ScrolledWindow, SearchEntry, SpinButton, Switch, Window,
+    Align, Button, DropDown, Entry, EventControllerFocus, Image, Label, ListBox, ListBoxRow,
+    Orientation, ScrolledWindow, SearchEntry, SpinButton, Switch, Window,
 };
-use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 use tracing::warn;
 
-/// Make `win` a floating dropdown panel anchored under the (top) bar: a standalone layer-shell
-/// surface — NOT a `GtkPopover`, because dwl won't give keyboard focus to a layer surface's popup —
-/// with `Exclusive` keyboard (which dwl *does* honor, like wofi/fuzzel) so text entry works. Escape
-/// closes it. The WM doesn't tile it; it sits below the bar's exclusive zone.
-fn dropdown_panel(win: &Window) {
-    win.init_layer_shell();
-    win.set_layer(Layer::Overlay);
-    win.set_anchor(Edge::Top, true); // below the bar (the bar's exclusive zone reserves its strip)
-    win.set_margin(Edge::Top, 4);
-    win.set_keyboard_mode(KeyboardMode::Exclusive);
-    let key = EventControllerKey::new();
-    let w = win.downgrade();
-    key.connect_key_pressed(move |_, keyval, _, _| {
-        if keyval == gtk4::gdk::Key::Escape {
-            if let Some(w) = w.upgrade() {
-                w.destroy();
-            }
-            gtk4::glib::Propagation::Stop
-        } else {
-            gtk4::glib::Propagation::Proceed
-        }
-    });
-    win.add_controller(key);
-}
+use crate::dropdown;
 use wafflebar_core::{Config, ConfigField, FieldKind, Position};
 
 use crate::plugins;
@@ -60,9 +36,8 @@ enum Target {
     Module(usize),
 }
 
-/// Shared handles for the open Settings popover. `popover`/`parent`/`form` are `Weak` so handlers
-/// owned by those widgets don't form a reference cycle — same discipline as `Weak<Host>`. `parent`
-/// is the bar widget the popover is anchored to (needed to rebuild on add/remove).
+/// Shared handles for the open Settings panel. `window`/`form` are `Weak` so handlers owned by those
+/// widgets don't form a reference cycle — same discipline as `Weak<Host>`.
 #[derive(Clone)]
 struct Ctx {
     path: Rc<PathBuf>,
@@ -89,9 +64,9 @@ impl Ctx {
     }
 }
 
-/// Open the preferences popover, anchored to `parent` (the bar). A popover is an xdg-popup: it
-/// floats (the WM doesn't tile it), grabs the keyboard for text entry, and dismisses on click-out /
-/// Escape — unlike the layer-shell window it replaces.
+/// Open the preferences panel — a floating layer-shell dropdown under the bar (see
+/// [`crate::dropdown`]): it floats (not tiled), accepts keyboard for text entry on dwl (which a
+/// GtkPopover can't), and closes via the ✕ button or Escape.
 pub fn open(config_path: &Path) {
     let config = match Config::load(config_path) {
         Ok(c) => c,
@@ -103,7 +78,7 @@ pub fn open(config_path: &Path) {
     let path = Rc::new(config_path.to_path_buf());
 
     let window = Window::builder().default_width(620).default_height(460).build();
-    dropdown_panel(&window); // floating layer-shell dropdown under the bar, Exclusive keyboard
+    dropdown::panel(&window); // floating layer-shell dropdown under the bar, Exclusive keyboard
 
     let form = gtk4::Box::new(Orientation::Vertical, 8);
     form.set_margin_top(12);
@@ -504,7 +479,7 @@ struct PickerRow {
 /// close), so its search box can actually receive keyboard on dwl.
 fn open_picker(title: &str, rows: Vec<PickerRow>, on_pick: impl Fn(&str) + 'static) {
     let win = Window::builder().default_width(440).default_height(480).build();
-    dropdown_panel(&win);
+    dropdown::panel(&win);
 
     let vbox = gtk4::Box::new(Orientation::Vertical, 6);
     vbox.set_margin_top(8);
