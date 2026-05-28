@@ -220,6 +220,7 @@ fn present_bar(
                 );
                 apply_bar_layout(&window, &new_config.bar);
                 host.set_position(new_config.bar.position);
+                host.set_icon_size(new_config.bar.effective_icon_size());
 
                 host.render_all();
                 info!(modules = engine.placements.len(), "structural reload applied");
@@ -478,8 +479,15 @@ fn build_grid_and_host(
         })
     };
 
-    let host =
-        Host::new(slots, command_sink, launch_sink, volume_sink, tray_sink, config.bar.position);
+    let host = Host::new(
+        slots,
+        command_sink,
+        launch_sink,
+        volume_sink,
+        tray_sink,
+        config.bar.position,
+        config.bar.effective_icon_size(),
+    );
 
     // Start the backends the initial module set needs (re-run on every structural reload).
     reconcile_backends(&backends, &host, needs_audio, needs_network, needs_tray);
@@ -809,6 +817,7 @@ mod tests {
             Box::new(|_: &VolumeCommand| {}),
             Box::new(|_: &TrayCommand| {}),
             Position::Top,
+            18,
         )
     }
 

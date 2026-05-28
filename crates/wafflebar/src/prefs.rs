@@ -565,6 +565,7 @@ fn bar_config_schema() -> Vec<ConfigField> {
     vec![
         ConfigField::choice("position", "Position", &[("top", "Top"), ("bottom", "Bottom")], "top"),
         ConfigField::int("height", "Height (px)", 16, 64, 28),
+        ConfigField::int("icon_size", "Icon size (px, 0 = auto from height)", 0, 64, 0),
         // TODO(prefs): populate monitor options from the live output list (a dynamic Choice via
         // `&self`), instead of the static common selectors.
         ConfigField::choice(
@@ -601,7 +602,11 @@ fn current_str(config: &Config, target: Target, key: &str) -> Option<String> {
 fn current_int(config: &Config, target: Target, key: &str) -> Option<i64> {
     match target {
         Target::Module(i) => config.modules.get(i)?.opt_i64(key),
-        Target::Bar => (key == "height").then_some(config.bar.height as i64),
+        Target::Bar => match key {
+            "height" => Some(config.bar.height as i64),
+            "icon_size" => Some(config.bar.icon_size as i64),
+            _ => None,
+        },
     }
 }
 

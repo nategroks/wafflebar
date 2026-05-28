@@ -73,9 +73,26 @@ pub struct BarConfig {
     /// Bar thickness in pixels (also the layer-shell exclusive zone).
     #[serde(default = "default_height")]
     pub height: u32,
+    /// Icon pixel size for bar glyphs. `0` (default) auto-derives from `height` so icons track the
+    /// bar's thickness; a non-zero value pins an explicit size. See [`BarConfig::effective_icon_size`].
+    #[serde(default)]
+    pub icon_size: u32,
     /// Optional path to a GTK CSS theme file.
     #[serde(default)]
     pub theme: Option<String>,
+}
+
+impl BarConfig {
+    /// The icon pixel size to actually render at: the explicit `icon_size` when set, else derived
+    /// from `height` (leaving room for button padding so a glyph fits inside the bar). Clamped to a
+    /// sane floor so a tiny bar still shows visible icons.
+    pub fn effective_icon_size(&self) -> u32 {
+        if self.icon_size > 0 {
+            self.icon_size
+        } else {
+            self.height.saturating_sub(8).max(8)
+        }
+    }
 }
 
 impl Default for BarConfig {
@@ -86,6 +103,7 @@ impl Default for BarConfig {
             layout: Layout::default(),
             spacing: 0,
             height: default_height(),
+            icon_size: 0,
             theme: None,
         }
     }
@@ -352,5 +370,17 @@ mod tests {
         assert_eq!(kinds, ["appmenu", "clock"]);
         assert_eq!(cfg.modules[0].align, Align::Start, "menu packs left");
         assert_eq!(cfg.modules[1].align, Align::End, "clock packs right");
+    }
+
+    #[test]
+    fn icon_size_auto_derives_from_height_else_explicit() {
+        let mut bar = BarConfig::default(); // icon_size = 0 (auto), height = 26
+        assert_eq!(bar.effective_icon_size(), 18, "auto: height - 8");
+        bar.height = 40;
+        assert_eq!(bar.effective_icon_size(), 32, "auto scales with height");
+        bar.height = 10;
+        assert_eq!(bar.effective_icon_size(), 8, "auto clamps to a visible floor");
+        bar.icon_size = 24;
+        assert_eq!(bar.effective_icon_size(), 24, "explicit pins the size regardless of height");
     }
 }
