@@ -74,7 +74,7 @@ impl Plugin for AppMenu {
 
     fn config_schema(&self) -> Vec<ConfigField> {
         vec![
-            ConfigField::text("icon", "Button icon (theme name or PNG/SVG path)", DEFAULT_ICON),
+            ConfigField::file("icon", "Button icon (theme name or PNG/SVG path)", DEFAULT_ICON),
             ConfigField::text("label", "Button text (blank = icon only)", ""),
             ConfigField::bool("show_recents", "Show recent applications", true),
             ConfigField::int("max_recents", "Recent applications shown", 0, 50, DEFAULT_MAX_RECENTS),
