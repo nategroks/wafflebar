@@ -67,6 +67,9 @@ pub struct BarConfig {
     /// tight to each edge) or `"grid"` (explicit `rows × columns` cell placement).
     #[serde(default)]
     pub layout: Layout,
+    /// Extra space (px) between adjacent modules — on top of each module's own padding.
+    #[serde(default)]
+    pub spacing: u32,
     /// Bar thickness in pixels (also the layer-shell exclusive zone).
     #[serde(default = "default_height")]
     pub height: u32,
@@ -81,6 +84,7 @@ impl Default for BarConfig {
             monitor: default_monitor(),
             position: Position::Top,
             layout: Layout::default(),
+            spacing: 0,
             height: default_height(),
             theme: None,
         }

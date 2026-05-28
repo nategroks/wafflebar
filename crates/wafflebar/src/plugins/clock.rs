@@ -3,19 +3,30 @@
 //! Canary for the `View` boundary (see `docs/ARCHITECTURE.md`): a read-only module should be
 //! trivial on the trait. It is — `view()` is one `View::label(formatted_time)`.
 
-use chrono::Local;
+use chrono::{Local, Utc};
+use chrono_tz::Tz;
+use tracing::warn;
 use wafflebar_core::{ActionId, ConfigField, Event, Plugin, ModuleConfig, Reaction, Topic, View};
 
 const DEFAULT_FORMAT: &str = "%a %d %b   %H:%M";
 
 pub struct Clock {
     format: String,
+    /// Optional IANA timezone (e.g. `America/Chicago`); `None` = system local time. Handles
+    /// DST automatically (so "CST" is correct year-round via `America/Chicago`).
+    timezone: Option<Tz>,
 }
 
 impl Clock {
     pub fn new(cfg: &ModuleConfig) -> Self {
+        let timezone = cfg.opt_str("timezone").filter(|s| !s.is_empty()).and_then(|s| {
+            s.parse::<Tz>()
+                .map_err(|_| warn!(timezone = s, "clock: unknown timezone; using system local"))
+                .ok()
+        });
         Self {
             format: cfg.opt_str("format").unwrap_or(DEFAULT_FORMAT).to_string(),
+            timezone,
         }
     }
 }
@@ -30,7 +41,11 @@ impl Plugin for Clock {
     }
 
     fn view(&self) -> View {
-        View::label(Local::now().format(&self.format).to_string()).with_class("clock")
+        let text = match self.timezone {
+            Some(tz) => Utc::now().with_timezone(&tz).format(&self.format).to_string(),
+            None => Local::now().format(&self.format).to_string(),
+        };
+        View::label(text).with_class("clock")
     }
 
     fn on_event(&mut self, ev: &Event) -> Reaction {
@@ -53,7 +68,10 @@ impl Plugin for Clock {
     }
 
     fn config_schema(&self) -> Vec<ConfigField> {
-        vec![ConfigField::text("format", "Time format (strftime)", DEFAULT_FORMAT)]
+        vec![
+            ConfigField::text("format", "Time format (strftime)", DEFAULT_FORMAT),
+            ConfigField::text("timezone", "Timezone (IANA, e.g. America/Chicago; blank = system)", ""),
+        ]
     }
 }
 
@@ -69,5 +87,15 @@ mod tests {
         let r = c.configure(&cfg(&[("format", toml::Value::from("%H:%M:%S"))]));
         assert!(r.dirty);
         assert_eq!(c.format, "%H:%M:%S");
+    }
+
+    #[test]
+    fn parses_timezone_and_falls_back_on_unknown() {
+        let c = Clock::new(&cfg(&[("timezone", toml::Value::from("America/Chicago"))]));
+        assert_eq!(c.timezone, Some(chrono_tz::America::Chicago));
+        let bad = Clock::new(&cfg(&[("timezone", toml::Value::from("Nowhere/Bogus"))]));
+        assert_eq!(bad.timezone, None, "unknown tz → system local");
+        let none = Clock::new(&cfg(&[]));
+        assert_eq!(none.timezone, None);
     }
 }
