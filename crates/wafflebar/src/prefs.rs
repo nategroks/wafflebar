@@ -22,8 +22,19 @@ use gtk4::{
     Align, Application, ApplicationWindow, Button, DropDown, Entry, EventControllerFocus, Image,
     Label, ListBox, ListBoxRow, Orientation, ScrolledWindow, SearchEntry, SpinButton, Switch,
 };
+use gtk4_layer_shell::{KeyboardMode, Layer, LayerShell};
 use tracing::warn;
 use wafflebar_core::{Config, ConfigField, FieldKind, Position};
+
+/// Make a window a centered, floating layer-shell **overlay** instead of a normal toplevel, so a
+/// tiling compositor (dwl/sway/i3) won't tile it to half the screen. No edge anchors → the
+/// compositor centers the surface at its requested size; `OnDemand` keyboard so text entry works.
+/// Must be called before the window is presented.
+fn float_overlay(win: &impl LayerShell) {
+    win.init_layer_shell();
+    win.set_layer(Layer::Overlay);
+    win.set_keyboard_mode(KeyboardMode::OnDemand);
+}
 
 use crate::plugins;
 
@@ -82,6 +93,7 @@ pub fn open(app: &Application, config_path: &Path) {
         .default_width(620)
         .default_height(460)
         .build();
+    float_overlay(&window); // centered overlay, not tiled by the WM
     let form = gtk4::Box::new(Orientation::Vertical, 8);
     form.set_margin_top(12);
     form.set_margin_bottom(12);
@@ -412,21 +424,22 @@ struct PickerRow {
     payload: String,
 }
 
-/// A modal, searchable single-select list over `parent`, calling `on_pick(payload)` on activation.
-/// Shared by Add Items and the application picker.
+/// A searchable single-select list, calling `on_pick(payload)` on activation. Shared by Add Items
+/// and the application picker. Rendered as a floating layer-shell overlay (above Settings, not
+/// tiled by the WM); `transient_for`/`modal` don't apply to layer surfaces. `_parent` is retained
+/// for the call shape (and a future re-anchor to Settings if desired).
 fn open_picker(
-    parent: &ApplicationWindow,
+    _parent: &ApplicationWindow,
     title: &str,
     rows: Vec<PickerRow>,
     on_pick: impl Fn(&str) + 'static,
 ) {
     let win = gtk4::Window::builder()
         .title(title)
-        .transient_for(parent) // keep the picker over Settings, dismissed with it
-        .modal(true)
         .default_width(440)
         .default_height(480)
         .build();
+    float_overlay(&win); // floating overlay above Settings, not tiled
     let vbox = gtk4::Box::new(Orientation::Vertical, 6);
     vbox.set_margin_top(8);
     vbox.set_margin_bottom(8);
