@@ -19,8 +19,8 @@ use std::rc::Rc;
 use gtk4::glib;
 use gtk4::prelude::*;
 use gtk4::{
-    Align, Button, DropDown, Entry, EventControllerFocus, Image, Label, ListBox, ListBoxRow,
-    Orientation, ScrolledWindow, SearchEntry, SpinButton, Switch, Window,
+    gdk, Align, Button, DragSource, DropDown, DropTarget, Entry, EventControllerFocus, Image, Label,
+    ListBox, ListBoxRow, Orientation, ScrolledWindow, SearchEntry, SpinButton, Switch, Window,
 };
 use tracing::warn;
 
@@ -99,8 +99,32 @@ pub fn open(config_path: &Path) {
     let list = ListBox::new();
     list.set_width_request(190);
     list.append(&list_row("Bar  ·  position, size, theme"));
-    for m in &config.modules {
-        list.append(&list_row(&format!("{}  ·  cell ({}, {})", m.kind, m.cell.row, m.cell.col)));
+    for (mi, m) in config.modules.iter().enumerate() {
+        let row = list_row(&format!("⠿  {}  ·  cell ({}, {})", m.kind, m.cell.row, m.cell.col));
+        // Drag-to-reorder (P5): the row carries its module index; dropping it on another module row
+        // rewrites the `[[modules]]` order in the TOML, which the watcher reloads. The Bar row above
+        // has no source/target, so it's neither draggable nor a drop site.
+        let src = DragSource::new();
+        src.set_actions(gdk::DragAction::MOVE);
+        src.connect_prepare(move |_, _, _| {
+            Some(gdk::ContentProvider::for_value(&(mi as i32).to_value()))
+        });
+        row.add_controller(src);
+        let tgt = DropTarget::new(i32::static_type(), gdk::DragAction::MOVE);
+        tgt.connect_drop({
+            let ctx = ctx.clone();
+            move |_, val, _, _| {
+                let Ok(from) = val.get::<i32>() else { return false };
+                let from = from as usize;
+                if from != mi {
+                    move_module(&ctx.path, from, mi);
+                    ctx.reopen(); // rebuild the window so the list reflects the new order
+                }
+                true
+            }
+        });
+        row.add_controller(tgt);
+        list.append(&row);
     }
     list.connect_row_selected({
         let ctx = ctx.clone();
@@ -704,6 +728,38 @@ fn append_module(path: &Path, kind: &str, col: u32) {
     });
 }
 
+/// Move the `from`-th `[[modules]]` entry so it lands at index `to` (drag-to-reorder, P5). Rebuilds
+/// the array-of-tables (toml_edit has no element-move/insert); each module table is cloned intact, so
+/// per-module keys/comments survive. No-op on out-of-range or `from == to`.
+fn move_module(path: &Path, from: usize, to: usize) {
+    edit_doc(path, |doc| {
+        let Some(aot) = doc.get("modules").and_then(|m| m.as_array_of_tables()) else {
+            return false;
+        };
+        let n = aot.len();
+        if from >= n || to >= n || from == to {
+            return false;
+        }
+        // Reuse the modules' existing document positions (ascending), reassigned in the new order —
+        // toml_edit renders array-of-tables by each table's parsed `position`, so a bare reorder of
+        // the Vec is ignored; setting fresh small positions would instead hoist them above `[bar]`.
+        let mut slots: Vec<usize> = aot.iter().filter_map(|t| t.position()).collect();
+        slots.sort_unstable();
+        let mut tables: Vec<toml_edit::Table> = aot.iter().cloned().collect();
+        let moved = tables.remove(from);
+        tables.insert(to.min(tables.len()), moved);
+        let mut rebuilt = toml_edit::ArrayOfTables::new();
+        for (i, mut t) in tables.into_iter().enumerate() {
+            if let Some(p) = slots.get(i) {
+                t.set_position(*p);
+            }
+            rebuilt.push(t);
+        }
+        doc["modules"] = toml_edit::Item::ArrayOfTables(rebuilt);
+        true
+    });
+}
+
 /// Remove the i-th `[[modules]]` entry.
 fn remove_module(path: &Path, i: usize) {
     edit_doc(path, |doc| match doc.get_mut("modules").and_then(|m| m.as_array_of_tables_mut()) {
@@ -804,6 +860,25 @@ mod tests {
         let cfg = Config::parse(&std::fs::read_to_string(&p).unwrap()).unwrap();
         assert_eq!(cfg.modules.len(), 1);
         assert_eq!(cfg.modules[0].kind, "launcher");
+        std::fs::remove_file(&p).ok();
+    }
+
+    #[test]
+    fn move_module_reorders_and_preserves_tables() {
+        let p = tmp("move"); // CFG = [clock, launcher]
+        move_module(&p, 0, 1); // clock → index 1
+        let out = std::fs::read_to_string(&p).unwrap();
+        let cfg = Config::parse(&out).unwrap();
+        let kinds: Vec<&str> = cfg.modules.iter().map(|m| m.kind.as_str()).collect();
+        assert_eq!(kinds, ["launcher", "clock"], "order swapped");
+        // per-module keys survive the rebuild, and the top-of-file comment is untouched
+        assert_eq!(cfg.modules[1].opt_str("format"), Some("%H:%M"), "moved module kept its keys");
+        assert!(out.contains("# keep me"));
+        // no-ops: out of range / same index leave the file byte-identical
+        let before = std::fs::read_to_string(&p).unwrap();
+        move_module(&p, 1, 1);
+        move_module(&p, 9, 0);
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), before, "no-op moves change nothing");
         std::fs::remove_file(&p).ok();
     }
 
