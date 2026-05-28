@@ -37,7 +37,7 @@ pub use config::{
     Align, Alignment, BarConfig, Cell, Config, ConfigError, GridConfig, Layout, ModuleConfig,
     Position, SCHEMA_VERSION,
 };
-pub use audio::{VolumeCommand, VolumeEvent, VOLUME_NORM};
+pub use audio::{SinkInfo, VolumeCommand, VolumeEvent, VOLUME_NORM};
 pub use bluetooth::{BluetoothCommand, BluetoothState, BtDevice};
 pub use cpu::CpuState;
 pub use freedesktop::{application_dirs, list_applications, DesktopAction, DesktopApp, Launch};

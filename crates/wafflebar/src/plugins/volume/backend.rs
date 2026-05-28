@@ -66,8 +66,14 @@ impl PulseBackend {
         if self.context.borrow().get_state() != State::Ready {
             return;
         }
+        // Switching the default sink doesn't need the resolve-default round-trip — it *sets* the
+        // default. Handled directly; the subscription then re-emits the new default's level.
+        if let VolumeCommand::SetDefaultSink(name) = cmd {
+            self.context.borrow_mut().set_default_sink(name, |_success| {});
+            return;
+        }
         let ctx = self.context.clone();
-        let cmd = *cmd;
+        let cmd = cmd.clone(); // VolumeCommand isn't Copy any more (SetDefaultSink carries a String)
         // Resolve the default sink, then apply against its current state.
         let introspect = self.context.borrow().introspect();
         introspect.get_server_info(move |server| {
@@ -75,10 +81,11 @@ impl PulseBackend {
                 return;
             };
             let ctx = ctx.clone();
+            let cmd = cmd.clone();
             let introspect = ctx.borrow().introspect();
             introspect.get_sink_info_by_name(&name, move |res| {
                 if let ListResult::Item(info) = res {
-                    apply(&ctx, info, cmd);
+                    apply(&ctx, info, cmd.clone()); // closure may fire twice (Item + End) — clone
                 }
             });
         });
@@ -147,10 +154,38 @@ fn subscribe_and_prime(context: &Rc<RefCell<Context>>, handler: &Handler) {
             .set_subscribe_callback(Some(Box::new(move |_facility, _op, _idx| {
                 if let Some(ctx) = ctx_weak.upgrade() {
                     query_default_sink(&ctx, &handler_sub);
+                    query_sinks(&ctx, &handler_sub); // sink set/default may have changed too
                 }
             })));
     }
     query_default_sink(context, handler); // initial value
+    query_sinks(context, handler); // initial sink list (for the output picker)
+}
+
+/// Enumerate all sinks and emit them with the current default flagged, so the host can build an
+/// output picker. Re-run on any sink/server subscription event (the list or the default may move).
+fn query_sinks(context: &Rc<RefCell<Context>>, handler: &Handler) {
+    let ctx = context.clone();
+    let handler = handler.clone();
+    let introspect = context.borrow().introspect();
+    introspect.get_server_info(move |server| {
+        let default = server.default_sink_name.as_ref().map(|n| n.to_string()).unwrap_or_default();
+        let handler = handler.clone();
+        let collected: Rc<RefCell<Vec<wafflebar_core::SinkInfo>>> = Rc::new(RefCell::new(Vec::new()));
+        let introspect = ctx.borrow().introspect();
+        introspect.get_sink_info_list(move |res| match res {
+            ListResult::Item(info) => {
+                let name = info.name.as_ref().map(|n| n.to_string()).unwrap_or_default();
+                let description = info.description.as_ref().map(|n| n.to_string()).unwrap_or_default();
+                let is_default = !name.is_empty() && name == default;
+                collected.borrow_mut().push(wafflebar_core::SinkInfo { name, description, is_default });
+            }
+            ListResult::End | ListResult::Error => {
+                let list = std::mem::take(&mut *collected.borrow_mut());
+                emit(&handler, VolumeEvent::Sinks(list));
+            }
+        });
+    });
 }
 
 /// Read the default sink's volume/mute and emit a typed event.
@@ -201,6 +236,7 @@ fn apply(context: &Rc<RefCell<Context>>, info: &SinkInfo, cmd: VolumeCommand) {
             volume.set(volume.len(), Volume(target));
             introspect.set_sink_volume_by_index(info.index, &volume, None);
         }
+        VolumeCommand::SetDefaultSink(_) => {} // handled directly in execute(); never reaches apply
     }
 }
 
