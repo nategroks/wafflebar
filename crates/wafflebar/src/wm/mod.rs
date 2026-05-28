@@ -1,6 +1,6 @@
 //! Window-manager backends behind the [`WindowManager`](wafflebar_core::WindowManager) seam.
 //!
-//! `dwl` is implemented (M2); `sway` is next (i3-ipc). The four other backends (river, Hyprland, i3,
+//! `dwl` (M2) and `sway`/`i3` (i3-ipc) are implemented. The four other backends (river, Hyprland, i3,
 //! bspwm) had stub files since M2 that named each one's IPC, to *validate the trait shape* against
 //! more than one mental model. That validation is complete — the data model (`Tag`/`Window`/
 //! `WmCommand`) held against dwl's bitmask tags and (in the sway work) named workspaces — so the
@@ -12,7 +12,7 @@ use std::cell::RefCell;
 use std::os::fd::RawFd;
 use std::rc::Rc;
 
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 use wafflebar_core::{WindowManager, WmEvent};
 
 pub mod dwl;
@@ -29,16 +29,23 @@ pub trait WmConnection: WindowManager {
     fn dispatch(&mut self) -> Vec<WmEvent>;
 }
 
-/// Connect to the running compositor. Tries dwl today; the sway branch lands in PR-B. `None` means
+/// Connect to the running compositor: sway/i3 (`$SWAYSOCK`/`$I3SOCK`) first, then dwl. `None` means
 /// no supported compositor — the bar still runs, WM-driven modules just stay empty.
 pub fn connect_backend() -> Option<Rc<RefCell<dyn WmConnection>>> {
+    match sway::SwayBackend::connect() {
+        Ok(b) => {
+            info!("sway/i3 backend connected");
+            return Some(Rc::new(RefCell::new(b)) as Rc<RefCell<dyn WmConnection>>);
+        }
+        Err(e) => debug!(error = %e, "no sway/i3 session"), // expected off sway/i3
+    }
     match dwl::DwlBackend::connect() {
         Ok(b) => {
             info!("dwl backend connected");
             Some(Rc::new(RefCell::new(b)) as Rc<RefCell<dyn WmConnection>>)
         }
         Err(e) => {
-            warn!(error = %e, "dwl backend unavailable; tags/window will be empty");
+            warn!(error = %e, "no compositor backend (sway/i3/dwl); tags/window will be empty");
             None
         }
     }

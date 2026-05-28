@@ -376,6 +376,21 @@ abandoned: they were scaffolding to check the data model against multiple mental
 (bitmask tags) and sway (named workspaces) both fitting `Tag{index,name}`, the scaffolding's done.
 river/Hyprland/bspwm return as focused PRs; i3 rides the sway backend (shared i3-ipc).
 
+**The sway backend (i3-ipc) specifics.** Two connections, the **swaybar idiom**: a `SUBSCRIBE`d event
+stream (its fd is what the host watches) kept clean of command replies, and a request-reply
+query/command connection — interleaving replies with the event stream is parseable (events OR in the
+high bit) but the two-socket split is simpler and conventional. **Event = trigger, query = truth:** an
+event only prompts a re-`GET_WORKSPACES`/`GET_TREE`, because a fast user may have changed state again
+before we read; trust the query, not the event payload. The **i3-ipc framing codec** (magic + native
+u32 len + u32 type + JSON) is the third instance of *extract-the-decision-for-testability* (after
+`FakeWm` and `handle_key`): pure bytes↔messages, unit-tested with partial/concatenated/bad-magic
+buffers, no socket. **Named workspaces → `Tag{index, name}`:** index is position within the output,
+name is sway's workspace name; `FocusTag{tag: index}` maps back to `workspace "<name>"` (sway accepts
+the name). `SetMinimized` is a no-op (sway/i3 have no minimize). **i3 is effectively-included:**
+`connect_backend` tries `$SWAYSOCK` then `$I3SOCK` — same protocol, one unified backend (named `sway`
+for the primary target); i3 ships "sway-tested, i3-likely-works", a compat shim if quirks emerge. When
+a real i3-divergence or a third i3-ipc consumer appears, extract the codec to `core::i3_ipc`.
+
 ## Roadmap (phases, each tied to a real directory)
 - **A** finish M2 — `tasklist` (this PR).
 - **B** plugin framework — `Plugin::configure` (per-instance TOML + `notify` live-reload), `launcher`, `separator`/`showdesktop`.
