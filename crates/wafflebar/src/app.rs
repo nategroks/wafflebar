@@ -9,7 +9,7 @@ use gtk4::gdk;
 use gtk4::glib;
 use gtk4::prelude::*;
 use gtk4::{Application, ApplicationWindow, CenterBox, Grid, Orientation};
-use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
+use gtk4_layer_shell::{Edge, Layer, LayerShell};
 use tracing::{debug, info, warn};
 use wafflebar_core::{
     Align, Config, Event, GridEngine, Launch, Layout, Position, Topic, TrayCommand, VolumeCommand,
@@ -132,9 +132,6 @@ fn present_bar(
 
     window.init_layer_shell();
     window.set_layer(Layer::Top);
-    // OnDemand so the bar's popovers (apps-menu search, the Settings popover) can grab the keyboard
-    // for text entry; the bar itself never holds keyboard focus when nothing is popped up.
-    window.set_keyboard_mode(KeyboardMode::OnDemand);
     window.set_namespace(Some("wafflebar"));
     if let Some(mon) = monitor {
         window.set_monitor(Some(mon));
@@ -148,12 +145,8 @@ fn present_bar(
     if let Some(path) = config_path {
         let gesture = gtk4::GestureClick::new();
         gesture.set_button(gdk::BUTTON_SECONDARY);
-        let (win_weak, path_c) = (window.downgrade(), path.to_path_buf());
-        gesture.connect_pressed(move |_, _, _, _| {
-            if let Some(w) = win_weak.upgrade() {
-                crate::prefs::open(&w, &path_c); // anchor the Settings popover to the bar
-            }
-        });
+        let path_c = path.to_path_buf();
+        gesture.connect_pressed(move |_, _, _, _| crate::prefs::open(&path_c));
         window.add_controller(gesture);
     }
 

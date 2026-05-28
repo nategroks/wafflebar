@@ -19,11 +19,36 @@ use std::rc::Rc;
 use gtk4::glib;
 use gtk4::prelude::*;
 use gtk4::{
-    Align, Button, DropDown, Entry, EventControllerFocus, Image, Label, ListBox, ListBoxRow,
-    Orientation, Popover, ScrolledWindow, SearchEntry, SpinButton, Switch,
+    Align, Button, DropDown, Entry, EventControllerFocus, EventControllerKey, Image, Label, ListBox,
+    ListBoxRow, Orientation, ScrolledWindow, SearchEntry, SpinButton, Switch, Window,
 };
-use gtk4_layer_shell::{KeyboardMode, LayerShell};
+use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 use tracing::warn;
+
+/// Make `win` a floating dropdown panel anchored under the (top) bar: a standalone layer-shell
+/// surface — NOT a `GtkPopover`, because dwl won't give keyboard focus to a layer surface's popup —
+/// with `Exclusive` keyboard (which dwl *does* honor, like wofi/fuzzel) so text entry works. Escape
+/// closes it. The WM doesn't tile it; it sits below the bar's exclusive zone.
+fn dropdown_panel(win: &Window) {
+    win.init_layer_shell();
+    win.set_layer(Layer::Overlay);
+    win.set_anchor(Edge::Top, true); // below the bar (the bar's exclusive zone reserves its strip)
+    win.set_margin(Edge::Top, 4);
+    win.set_keyboard_mode(KeyboardMode::Exclusive);
+    let key = EventControllerKey::new();
+    let w = win.downgrade();
+    key.connect_key_pressed(move |_, keyval, _, _| {
+        if keyval == gtk4::gdk::Key::Escape {
+            if let Some(w) = w.upgrade() {
+                w.destroy();
+            }
+            gtk4::glib::Propagation::Stop
+        } else {
+            gtk4::glib::Propagation::Proceed
+        }
+    });
+    win.add_controller(key);
+}
 use wafflebar_core::{Config, ConfigField, FieldKind, Position};
 
 use crate::plugins;
@@ -41,8 +66,7 @@ enum Target {
 #[derive(Clone)]
 struct Ctx {
     path: Rc<PathBuf>,
-    popover: glib::WeakRef<Popover>,
-    parent: glib::WeakRef<gtk4::Window>,
+    window: glib::WeakRef<Window>,
     form: glib::WeakRef<gtk4::Box>,
 }
 
@@ -54,14 +78,13 @@ impl Ctx {
         }
     }
 
-    /// Reopen Settings (after adding/removing a module — the left list changed): pop down the
-    /// current popover and build a fresh one on the same bar parent. Simpler and leak-free versus
-    /// an in-place list refresh.
+    /// Reopen Settings (after adding/removing a module — the left list changed): close the current
+    /// panel and build a fresh one. Simpler and leak-free versus an in-place list refresh.
     fn reopen(&self) {
-        if let (Some(pop), Some(parent)) = (self.popover.upgrade(), self.parent.upgrade()) {
+        if let Some(win) = self.window.upgrade() {
             let path = (*self.path).clone();
-            pop.popdown();
-            open(&parent, &path);
+            win.destroy();
+            open(&path);
         }
     }
 }
@@ -69,7 +92,7 @@ impl Ctx {
 /// Open the preferences popover, anchored to `parent` (the bar). A popover is an xdg-popup: it
 /// floats (the WM doesn't tile it), grabs the keyboard for text entry, and dismisses on click-out /
 /// Escape — unlike the layer-shell window it replaces.
-pub fn open(parent: &impl gtk4::prelude::IsA<gtk4::Window>, config_path: &Path) {
+pub fn open(config_path: &Path) {
     let config = match Config::load(config_path) {
         Ok(c) => c,
         Err(e) => {
@@ -79,25 +102,8 @@ pub fn open(parent: &impl gtk4::prelude::IsA<gtk4::Window>, config_path: &Path) 
     };
     let path = Rc::new(config_path.to_path_buf());
 
-    let win = parent.upcast_ref::<gtk4::Window>(); // the bar — a layer-shell surface
-    let popover = Popover::new();
-    popover.set_autohide(true);
-    popover.set_has_arrow(false);
-    popover.set_parent(win);
-    popover.set_position(gtk4::PositionType::Bottom); // drop down from the (top) bar
-
-    // dwl (and minimal wlroots compositors) honor `Exclusive` layer-shell keyboard but not
-    // `OnDemand`, so text entry in the popover only works if the bar grabs the keyboard. Grab it
-    // while Settings is open and release it on dismiss so the bar doesn't hog the keyboard.
-    win.set_keyboard_mode(KeyboardMode::Exclusive);
-    {
-        let win_weak = win.downgrade();
-        popover.connect_closed(move |_| {
-            if let Some(w) = win_weak.upgrade() {
-                w.set_keyboard_mode(KeyboardMode::OnDemand);
-            }
-        });
-    }
+    let window = Window::builder().default_width(620).default_height(460).build();
+    dropdown_panel(&window); // floating layer-shell dropdown under the bar, Exclusive keyboard
 
     let form = gtk4::Box::new(Orientation::Vertical, 8);
     form.set_margin_top(12);
@@ -105,12 +111,7 @@ pub fn open(parent: &impl gtk4::prelude::IsA<gtk4::Window>, config_path: &Path) 
     form.set_margin_start(12);
     form.set_margin_end(12);
 
-    let ctx = Ctx {
-        path,
-        popover: popover.downgrade(),
-        parent: win.downgrade(),
-        form: form.downgrade(),
-    };
+    let ctx = Ctx { path, window: window.downgrade(), form: form.downgrade() };
 
     // Left: target list (Bar + each module) over an "Add Item" button.
     let list = ListBox::new();
@@ -143,14 +144,38 @@ pub fn open(parent: &impl gtk4::prelude::IsA<gtk4::Window>, config_path: &Path) 
     left.append(&add_btn);
 
     let split = gtk4::Box::new(Orientation::Horizontal, 0);
-    split.set_size_request(620, 460); // a popover sizes to content — give the form room
+    split.set_vexpand(true);
     split.append(&left);
     split.append(&gtk4::Separator::new(Orientation::Vertical));
     split.append(&ScrolledWindow::builder().child(&form).hexpand(true).build());
-    popover.set_child(Some(&split));
+
+    // Header with a close button (a layer-shell panel has no WM titlebar). Escape also closes.
+    let header = gtk4::Box::new(Orientation::Horizontal, 8);
+    header.set_margin_top(8);
+    header.set_margin_start(12);
+    header.set_margin_end(8);
+    let title = Label::new(Some("wafflebar settings"));
+    title.set_xalign(0.0);
+    title.set_hexpand(true);
+    let close = Button::with_label("✕");
+    {
+        let w = window.downgrade();
+        close.connect_clicked(move |_| {
+            if let Some(w) = w.upgrade() {
+                w.destroy();
+            }
+        });
+    }
+    header.append(&title);
+    header.append(&close);
+
+    let root = gtk4::Box::new(Orientation::Vertical, 0);
+    root.append(&header);
+    root.append(&split);
+    window.set_child(Some(&root));
 
     list.select_row(list.row_at_index(0).as_ref()); // open to the Bar form, never empty
-    popover.popup();
+    window.present();
 }
 
 fn list_row(text: &str) -> ListBoxRow {
@@ -410,7 +435,6 @@ fn wire_item_edit(
 /// Modal application picker (F4): a searchable list of installed `.desktop` apps; picking one
 /// appends its id to the launcher's items.
 fn open_app_picker(ctx: &Ctx, target: Target, key: &str, existing: Vec<String>) {
-    let Some(anchor) = ctx.popover.upgrade() else { return };
     let rows = wafflebar_core::list_applications()
         .into_iter()
         .map(|app| PickerRow {
@@ -422,7 +446,7 @@ fn open_app_picker(ctx: &Ctx, target: Target, key: &str, existing: Vec<String>) 
         })
         .collect();
     let (ctx, key) = (ctx.clone(), key.to_string());
-    open_picker(&anchor, "Add Application", rows, move |file_id| {
+    open_picker("Add Application", rows, move |file_id| {
         let mut items = existing.clone();
         items.push(file_id.to_string());
         if let Target::Module(i) = target {
@@ -435,7 +459,6 @@ fn open_app_picker(ctx: &Ctx, target: Target, key: &str, existing: Vec<String>) 
 /// Modal Add Items dialog (F4): the plugin catalog as a searchable list; picking a kind appends a
 /// `[[modules]]` entry and reopens the window.
 fn open_add_items(ctx: &Ctx) {
-    let Some(anchor) = ctx.popover.upgrade() else { return };
     let config = Config::load(&*ctx.path).unwrap_or_default();
     let present: std::collections::HashSet<&str> =
         config.modules.iter().map(|m| m.kind.as_str()).collect();
@@ -460,7 +483,7 @@ fn open_add_items(ctx: &Ctx) {
         .collect();
 
     let ctx = ctx.clone();
-    open_picker(&anchor, "Add Item", rows, move |kind| {
+    open_picker("Add Item", rows, move |kind| {
         append_module(&ctx.path, kind, next_col);
         ctx.reopen();
     });
@@ -477,22 +500,13 @@ struct PickerRow {
 }
 
 /// A searchable single-select list, calling `on_pick(payload)` on activation. Shared by Add Items
-/// and the application picker. Rendered as a nested popover anchored to `anchor` (the Settings
-/// popover) — an xdg-popup, so it floats over Settings, grabs the keyboard for the search, and
-/// dismisses on click-out, without being tiled by the WM.
-fn open_picker(
-    anchor: &impl gtk4::prelude::IsA<gtk4::Widget>,
-    title: &str,
-    rows: Vec<PickerRow>,
-    on_pick: impl Fn(&str) + 'static,
-) {
-    let popover = Popover::new();
-    popover.set_autohide(true);
-    popover.set_has_arrow(false);
-    popover.set_parent(anchor.upcast_ref::<gtk4::Widget>());
+/// and the application picker. A standalone layer-shell dropdown (Exclusive keyboard, Escape to
+/// close), so its search box can actually receive keyboard on dwl.
+fn open_picker(title: &str, rows: Vec<PickerRow>, on_pick: impl Fn(&str) + 'static) {
+    let win = Window::builder().default_width(440).default_height(480).build();
+    dropdown_panel(&win);
 
     let vbox = gtk4::Box::new(Orientation::Vertical, 6);
-    vbox.set_size_request(440, 480); // a popover sizes to content
     vbox.set_margin_top(8);
     vbox.set_margin_bottom(8);
     vbox.set_margin_start(8);
@@ -504,8 +518,8 @@ fn open_picker(
 
     if rows.is_empty() {
         vbox.append(&dim_label("No applications found."));
-        popover.set_child(Some(&vbox));
-        popover.popup();
+        win.set_child(Some(&vbox));
+        win.present();
         return;
     }
 
@@ -552,13 +566,13 @@ fn open_picker(
         move |_| listbox.invalidate_filter()
     });
     listbox.connect_row_activated({
-        let (rows, pop) = (rows.clone(), popover.downgrade());
+        let (rows, w) = (rows.clone(), win.downgrade());
         move |_, row| {
             if let Some(r) = rows.get(row.index() as usize) {
                 if r.sensitive {
                     on_pick(&r.payload);
-                    if let Some(p) = pop.upgrade() {
-                        p.popdown();
+                    if let Some(w) = w.upgrade() {
+                        w.destroy();
                     }
                 }
             }
@@ -567,8 +581,8 @@ fn open_picker(
 
     vbox.append(&search);
     vbox.append(&ScrolledWindow::builder().child(&listbox).vexpand(true).build());
-    popover.set_child(Some(&vbox));
-    popover.popup();
+    win.set_child(Some(&vbox));
+    win.present();
 }
 
 /// The bar's own settings, described against the `[bar]` table (host-owned, not from a plugin).
