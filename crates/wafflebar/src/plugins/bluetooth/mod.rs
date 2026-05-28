@@ -15,7 +15,9 @@ use wafflebar_core::{
 
 /// Click on the power row → toggle the adapter.
 const ACTION_POWER: &str = "bt-power";
-/// A device row's action is `bt-dev:<object-path>`; clicking toggles its connection.
+/// Click on the scan row → toggle device discovery.
+const ACTION_SCAN: &str = "bt-scan";
+/// A device row's action is `bt-dev:<object-path>`; clicking pairs (if new), or toggles connection.
 const PFX_DEV: &str = "bt-dev:";
 
 pub struct Bluetooth {
@@ -45,7 +47,8 @@ fn icon_for(s: &BluetoothState) -> &'static str {
     }
 }
 
-/// The popover menu: a power toggle row, then one row per paired device (or a dim placeholder).
+/// The popover menu: power toggle, scan toggle, then device rows (paired → connect/disconnect,
+/// discovered → pair). A `●` marks connected, `○` a paired-but-idle device, `+` a discovered one.
 fn menu(s: &BluetoothState) -> View {
     let mut children = vec![View::label(if s.powered {
         "Bluetooth: On"
@@ -55,18 +58,28 @@ fn menu(s: &BluetoothState) -> View {
     .with_class("bt-menu-power")
     .button(ActionId::new(ACTION_POWER))];
 
-    if !s.powered {
-        // Powered off → device rows aren't actionable; just the toggle.
-    } else if s.devices.is_empty() {
-        children.push(View::label("No paired devices").with_class("dim-label"));
-    } else {
-        for d in &s.devices {
-            let mark = if d.connected { "● " } else { "○ " };
-            children.push(
-                View::label(format!("{mark}{}", d.name))
-                    .with_class("bt-menu-item")
-                    .button(ActionId::new(format!("{PFX_DEV}{}", d.path))),
-            );
+    if s.powered {
+        children.push(
+            View::label(if s.discovering { "Stop scanning" } else { "Scan for devices" })
+                .with_class("bt-menu-item")
+                .button(ActionId::new(ACTION_SCAN)),
+        );
+        if s.devices.is_empty() {
+            let msg = if s.discovering { "Scanning…" } else { "No paired devices" };
+            children.push(View::label(msg).with_class("dim-label"));
+        } else {
+            for d in &s.devices {
+                let mark = match (d.paired, d.connected) {
+                    (true, true) => "● ",
+                    (true, false) => "○ ",
+                    (false, _) => "+ ", // discovered, not yet paired
+                };
+                children.push(
+                    View::label(format!("{mark}{}", d.name))
+                        .with_class("bt-menu-item")
+                        .button(ActionId::new(format!("{PFX_DEV}{}", d.path))),
+                );
+            }
         }
     }
 
@@ -111,13 +124,21 @@ impl Plugin for Bluetooth {
         if a == ACTION_POWER {
             return Reaction::bluetooth(BluetoothCommand::SetPowered(!self.state.powered));
         }
+        if a == ACTION_SCAN {
+            return Reaction::bluetooth(BluetoothCommand::SetDiscovering(!self.state.discovering));
+        }
         if let Some(path) = a.strip_prefix(PFX_DEV) {
-            let connected = self.state.devices.iter().any(|d| d.path == path && d.connected);
-            return Reaction::bluetooth(if connected {
+            let Some(dev) = self.state.devices.iter().find(|d| d.path == path) else {
+                return Reaction::none();
+            };
+            let cmd = if !dev.paired {
+                BluetoothCommand::Pair(path.to_string()) // discovered → pair (then connect)
+            } else if dev.connected {
                 BluetoothCommand::Disconnect(path.to_string())
             } else {
                 BluetoothCommand::Connect(path.to_string())
-            });
+            };
+            return Reaction::bluetooth(cmd);
         }
         Reaction::none()
     }
@@ -129,10 +150,13 @@ mod tests {
     use wafflebar_core::BtDevice;
 
     fn state(present: bool, powered: bool, devices: Vec<BtDevice>) -> BluetoothState {
-        BluetoothState { present, powered, devices }
+        BluetoothState { present, powered, discovering: false, devices }
     }
     fn dev(path: &str, name: &str, connected: bool) -> BtDevice {
-        BtDevice { path: path.into(), name: name.into(), connected }
+        BtDevice { path: path.into(), name: name.into(), paired: true, connected }
+    }
+    fn discovered(path: &str, name: &str) -> BtDevice {
+        BtDevice { path: path.into(), name: name.into(), paired: false, connected: false }
     }
 
     #[test]
@@ -185,6 +209,29 @@ mod tests {
             b.on_action(&ActionId::new("bt-dev:/d2")).bluetooth,
             vec![BluetoothCommand::Disconnect("/d2".into())],
             "connected device → Disconnect"
+        );
+    }
+
+    #[test]
+    fn scan_toggles_discovery() {
+        let mut b = Bluetooth::new();
+        b.on_event(&Event::Bluetooth(state(true, true, vec![])));
+        assert_eq!(
+            b.on_action(&ActionId::new(ACTION_SCAN)).bluetooth,
+            vec![BluetoothCommand::SetDiscovering(true)]
+        );
+    }
+
+    #[test]
+    fn discovered_device_pairs() {
+        let mut b = Bluetooth::new();
+        let mut s = state(true, true, vec![discovered("/new", "Headphones")]);
+        s.discovering = true;
+        b.on_event(&Event::Bluetooth(s));
+        assert_eq!(
+            b.on_action(&ActionId::new("bt-dev:/new")).bluetooth,
+            vec![BluetoothCommand::Pair("/new".into())],
+            "unpaired discovered device → Pair"
         );
     }
 }
