@@ -230,9 +230,7 @@ pub fn build_appmenu(favorites: &[String], show_recents: bool, max_recents: u32,
             let app = shown.borrow().get(row.index() as usize).cloned();
             if let Some(app) = app {
                 launch(&app, &host);
-                if let Some(pop) = list.ancestor(Popover::static_type()).and_downcast::<Popover>() {
-                    pop.popdown();
-                }
+                popdown(list);
             }
         }
     });
@@ -381,9 +379,13 @@ fn launch_selected(app_list: &ListBox, shown: &Rc<RefCell<Vec<DesktopApp>>>, hos
     }
 }
 
+/// Close the menu, whether it's hosted in a popover (legacy) or — as now — a standalone layer-shell
+/// dropdown window (whose root is the menu's own window, not the bar).
 fn popdown(widget: &impl IsA<gtk4::Widget>) {
     if let Some(pop) = widget.ancestor(Popover::static_type()).and_downcast::<Popover>() {
         pop.popdown();
+    } else if let Some(win) = widget.root().and_downcast::<gtk4::Window>() {
+        win.destroy();
     }
 }
 
