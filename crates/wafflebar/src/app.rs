@@ -288,9 +288,10 @@ fn populate_pack(
     root.set_hexpand(true);
     root.set_widget_name("grid"); // keep the `#grid` CSS selector stable across both layouts
 
-    let start = gtk4::Box::new(Orientation::Horizontal, 0);
-    let center = gtk4::Box::new(Orientation::Horizontal, 0);
-    let end = gtk4::Box::new(Orientation::Horizontal, 0);
+    let spacing = config.bar.spacing as i32;
+    let start = gtk4::Box::new(Orientation::Horizontal, spacing);
+    let center = gtk4::Box::new(Orientation::Horizontal, spacing);
+    let end = gtk4::Box::new(Orientation::Horizontal, spacing);
     start.set_halign(gtk4::Align::Start);
     center.set_halign(gtk4::Align::Center);
     end.set_halign(gtk4::Align::End);
@@ -334,6 +335,7 @@ fn populate_grid_inner(
     let grid = Grid::builder()
         .hexpand(true)
         .column_homogeneous(true)
+        .column_spacing(config.bar.spacing as i32)
         .build();
     grid.set_widget_name("grid");
 

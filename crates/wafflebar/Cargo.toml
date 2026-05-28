@@ -19,6 +19,7 @@ tracing-subscriber.workspace = true
 gtk4 = { version = "0.11.3", features = ["v4_12"] }
 gtk4-layer-shell = "0.8.0"
 chrono = "0.4.44"
+chrono-tz = "0.10.4" # IANA timezone DB for the clock's `timezone` option (MIT/Apache)
 clap = { version = "4.6.1", features = ["derive"] }
 wayland-client = "0.31.14"
 wayland-scanner = "0.31.10"
