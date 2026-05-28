@@ -22,6 +22,7 @@ use gtk4::{
     Align, Button, DropDown, Entry, EventControllerFocus, Image, Label, ListBox, ListBoxRow,
     Orientation, Popover, ScrolledWindow, SearchEntry, SpinButton, Switch,
 };
+use gtk4_layer_shell::{KeyboardMode, LayerShell};
 use tracing::warn;
 use wafflebar_core::{Config, ConfigField, FieldKind, Position};
 
@@ -41,7 +42,7 @@ enum Target {
 struct Ctx {
     path: Rc<PathBuf>,
     popover: glib::WeakRef<Popover>,
-    parent: glib::WeakRef<gtk4::Widget>,
+    parent: glib::WeakRef<gtk4::Window>,
     form: glib::WeakRef<gtk4::Box>,
 }
 
@@ -68,7 +69,7 @@ impl Ctx {
 /// Open the preferences popover, anchored to `parent` (the bar). A popover is an xdg-popup: it
 /// floats (the WM doesn't tile it), grabs the keyboard for text entry, and dismisses on click-out /
 /// Escape — unlike the layer-shell window it replaces.
-pub fn open(parent: &impl gtk4::prelude::IsA<gtk4::Widget>, config_path: &Path) {
+pub fn open(parent: &impl gtk4::prelude::IsA<gtk4::Window>, config_path: &Path) {
     let config = match Config::load(config_path) {
         Ok(c) => c,
         Err(e) => {
@@ -78,12 +79,25 @@ pub fn open(parent: &impl gtk4::prelude::IsA<gtk4::Widget>, config_path: &Path) 
     };
     let path = Rc::new(config_path.to_path_buf());
 
-    let parent_w = parent.upcast_ref::<gtk4::Widget>();
+    let win = parent.upcast_ref::<gtk4::Window>(); // the bar — a layer-shell surface
     let popover = Popover::new();
     popover.set_autohide(true);
     popover.set_has_arrow(false);
-    popover.set_parent(parent_w);
+    popover.set_parent(win);
     popover.set_position(gtk4::PositionType::Bottom); // drop down from the (top) bar
+
+    // dwl (and minimal wlroots compositors) honor `Exclusive` layer-shell keyboard but not
+    // `OnDemand`, so text entry in the popover only works if the bar grabs the keyboard. Grab it
+    // while Settings is open and release it on dismiss so the bar doesn't hog the keyboard.
+    win.set_keyboard_mode(KeyboardMode::Exclusive);
+    {
+        let win_weak = win.downgrade();
+        popover.connect_closed(move |_| {
+            if let Some(w) = win_weak.upgrade() {
+                w.set_keyboard_mode(KeyboardMode::OnDemand);
+            }
+        });
+    }
 
     let form = gtk4::Box::new(Orientation::Vertical, 8);
     form.set_margin_top(12);
@@ -94,7 +108,7 @@ pub fn open(parent: &impl gtk4::prelude::IsA<gtk4::Widget>, config_path: &Path) 
     let ctx = Ctx {
         path,
         popover: popover.downgrade(),
-        parent: parent_w.downgrade(),
+        parent: win.downgrade(),
         form: form.downgrade(),
     };
 
