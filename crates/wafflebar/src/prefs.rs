@@ -43,6 +43,8 @@ struct Ctx {
     path: Rc<PathBuf>,
     window: glib::WeakRef<Window>,
     form: glib::WeakRef<gtk4::Box>,
+    /// The bar edge, so nested pickers anchor to the same side as the Settings panel.
+    position: Position,
 }
 
 impl Ctx {
@@ -78,7 +80,7 @@ pub fn open(config_path: &Path) {
     let path = Rc::new(config_path.to_path_buf());
 
     let window = Window::builder().default_width(620).default_height(460).build();
-    dropdown::panel(&window); // floating layer-shell dropdown under the bar, Exclusive keyboard
+    dropdown::panel(&window, config.bar.position); // floating dropdown hugging the bar's edge
 
     let form = gtk4::Box::new(Orientation::Vertical, 8);
     form.set_margin_top(12);
@@ -86,7 +88,12 @@ pub fn open(config_path: &Path) {
     form.set_margin_start(12);
     form.set_margin_end(12);
 
-    let ctx = Ctx { path, window: window.downgrade(), form: form.downgrade() };
+    let ctx = Ctx {
+        path,
+        window: window.downgrade(),
+        form: form.downgrade(),
+        position: config.bar.position,
+    };
 
     // Left: target list (Bar + each module) over an "Add Item" button.
     let list = ListBox::new();
@@ -421,7 +428,8 @@ fn open_app_picker(ctx: &Ctx, target: Target, key: &str, existing: Vec<String>) 
         })
         .collect();
     let (ctx, key) = (ctx.clone(), key.to_string());
-    open_picker("Add Application", rows, move |file_id| {
+    let position = ctx.position;
+    open_picker("Add Application", position, rows, move |file_id| {
         let mut items = existing.clone();
         items.push(file_id.to_string());
         if let Target::Module(i) = target {
@@ -458,7 +466,7 @@ fn open_add_items(ctx: &Ctx) {
         .collect();
 
     let ctx = ctx.clone();
-    open_picker("Add Item", rows, move |kind| {
+    open_picker("Add Item", ctx.position, rows, move |kind| {
         append_module(&ctx.path, kind, next_col);
         ctx.reopen();
     });
@@ -477,9 +485,9 @@ struct PickerRow {
 /// A searchable single-select list, calling `on_pick(payload)` on activation. Shared by Add Items
 /// and the application picker. A standalone layer-shell dropdown (Exclusive keyboard, Escape to
 /// close), so its search box can actually receive keyboard on dwl.
-fn open_picker(title: &str, rows: Vec<PickerRow>, on_pick: impl Fn(&str) + 'static) {
+fn open_picker(title: &str, position: Position, rows: Vec<PickerRow>, on_pick: impl Fn(&str) + 'static) {
     let win = Window::builder().default_width(440).default_height(480).build();
-    dropdown::panel(&win);
+    dropdown::panel(&win, position);
 
     let vbox = gtk4::Box::new(Orientation::Vertical, 6);
     vbox.set_margin_top(8);

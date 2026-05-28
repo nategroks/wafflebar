@@ -19,6 +19,7 @@ use gtk4::glib::WeakRef;
 use gtk4::prelude::*;
 use gtk4::{EventControllerKey, PropagationPhase, Window};
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
+use wafflebar_core::Position;
 
 thread_local! {
     /// The currently-open dropdown, if any. `Weak` so a window closed by other means doesn't linger
@@ -42,17 +43,24 @@ pub fn close_open() {
     }
 }
 
-/// Turn `win` into a floating dropdown panel: an `Overlay` layer surface anchored at the top-left
-/// under the bar, with `Exclusive` keyboard (so entries can type on dwl) and Escape-to-close. Call
-/// before `present`. Any previously-open dropdown is closed first — only one may exist at a time.
-pub fn panel(win: &Window) {
+/// Turn `win` into a floating dropdown panel: an `Overlay` layer surface anchored to the bar's edge
+/// (top or bottom, per `position`), pinned to the left, with `Exclusive` keyboard (so entries can
+/// type on dwl) and Escape-to-close. Call before `present`. Any previously-open dropdown is closed
+/// first — only one may exist at a time.
+pub fn panel(win: &Window, position: Position) {
     close_open(); // never let two Exclusive-keyboard surfaces coexist (see module docs)
 
+    // Anchor to the bar's own edge so a bottom bar drops *up* from the bottom, a top bar *down* from
+    // the top — the panel always hugs the bar, just past its exclusive zone.
+    let bar_edge = match position {
+        Position::Top => Edge::Top,
+        Position::Bottom => Edge::Bottom,
+    };
     win.init_layer_shell();
     win.set_layer(Layer::Overlay);
-    win.set_anchor(Edge::Top, true); // below the bar (its exclusive zone reserves the top strip)
+    win.set_anchor(bar_edge, true);
     win.set_anchor(Edge::Left, true); // pin to the left under the launchers, not centered
-    win.set_margin(Edge::Top, 4);
+    win.set_margin(bar_edge, 4);
     win.set_margin(Edge::Left, 4);
     win.set_keyboard_mode(KeyboardMode::Exclusive);
 
