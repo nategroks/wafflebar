@@ -21,6 +21,8 @@ schema = 1     # required-ish; defaults to the current version if omitted
 | `position` | `"top"` \| `"bottom"` | `"top"` | which screen edge the bar docks to |
 | `layout` | `"pack"` \| `"grid"` | `"pack"` | how modules are arranged — see below |
 | `height` | integer | `26` | bar thickness in px (also the layer-shell exclusive zone) |
+| `icon_size` | integer | `0` | icon pixel size for bar glyphs; `0` auto-derives from `height` so icons track the bar's thickness, a non-zero value pins an explicit size |
+| `spacing` | integer | `0` | extra px between adjacent modules |
 | `theme` | string | _(built-in Nord)_ | path to a GTK4 CSS file |
 
 ### `layout` — pack vs grid

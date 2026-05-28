@@ -43,6 +43,10 @@ pub struct Host {
     /// picked up without a stale cached anchor). `Cell` so a live `[bar]` reposition (F2c) can update
     /// it without rebuilding the host.
     position: std::cell::Cell<Position>,
+    /// Effective icon pixel size for bar glyphs (resolved from `[bar] icon_size`/`height` via
+    /// `BarConfig::effective_icon_size`). Applied to every `View::Icon` at render time so icons track
+    /// the bar's thickness. `Cell` so a live `[bar]` reload (F2c) updates it without rebuilding.
+    icon_size: std::cell::Cell<u32>,
     /// Host-owned application data for the applications menu (E2): the app cache + recents. Empty
     /// unless an `appmenu` plugin is present and `app.rs` populates it. The menu widget reads it at
     /// render time; the directory watch refreshes it and re-renders.
@@ -57,6 +61,7 @@ impl Host {
         volume_sink: Box<dyn Fn(&VolumeCommand)>,
         tray_sink: Box<dyn Fn(&TrayCommand)>,
         position: Position,
+        icon_size: u32,
     ) -> Rc<Self> {
         Rc::new(Self {
             slots: RefCell::new(slots),
@@ -65,6 +70,7 @@ impl Host {
             volume_sink,
             tray_sink,
             position: std::cell::Cell::new(position),
+            icon_size: std::cell::Cell::new(icon_size),
             menu: Rc::new(RefCell::new(crate::menu::MenuState::default())),
         })
     }
@@ -72,6 +78,16 @@ impl Host {
     /// Update the bar edge after a live `[bar]` reposition (F2c), so popovers open the right way.
     pub fn set_position(&self, position: Position) {
         self.position.set(position);
+    }
+
+    /// The effective icon pixel size for bar glyphs (see the `icon_size` field).
+    pub fn icon_size(&self) -> u32 {
+        self.icon_size.get()
+    }
+
+    /// Update the effective icon size after a live `[bar]` reload; the caller re-renders.
+    pub fn set_icon_size(&self, size: u32) {
+        self.icon_size.set(size);
     }
 
     /// The host-owned applications-menu state (app cache + recents); shared, so `app.rs` can
@@ -344,9 +360,13 @@ pub fn render_view(view: &View, slot: usize, host: &Rc<Host>) -> gtk4::Widget {
             add_classes(&l, classes);
             l.upcast()
         }
-        View::Icon { name, size, classes, pixmap, theme_path } => {
-            let img = build_icon(name, *size, theme_path.as_deref(), pixmap.as_ref());
-            img.set_pixel_size(*size as i32);
+        View::Icon { name, classes, pixmap, theme_path, .. } => {
+            // The host's effective icon size (derived from `[bar] icon_size`/`height`) wins so every
+            // bar glyph tracks the bar's thickness uniformly; the per-`View` `size` field is ignored
+            // here (kept as a plugin hint / for non-bar contexts).
+            let size = host.icon_size();
+            let img = build_icon(name, size, theme_path.as_deref(), pixmap.as_ref());
+            img.set_pixel_size(size as i32);
             add_classes(&img, classes);
             img.upcast()
         }
@@ -702,6 +722,7 @@ mod tests {
             Box::new(|_: &VolumeCommand| {}),
             Box::new(|_: &TrayCommand| {}),
             Position::Top,
+            18,
         )
     }
 
