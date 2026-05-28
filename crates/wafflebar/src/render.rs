@@ -174,6 +174,13 @@ impl Host {
         body.append(&Label::new(Some("Volume")));
         body.append(&row);
 
+        // Equalizer: a DSP EQ isn't part of the volume API — the standard PipeWire equalizer is the
+        // EasyEffects app, which inserts itself into the audio graph. The mixer just launches it.
+        let eq = Button::with_label("Equalizer…");
+        eq.add_css_class("mixer-eq");
+        eq.connect_clicked(|_| spawn(&["easyeffects".to_string()]));
+        body.append(&eq);
+
         let seed = {
             let (host, scale, mute, updating) = (self.clone(), scale.clone(), mute.clone(), updating.clone());
             move || {
