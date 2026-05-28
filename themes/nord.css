@@ -227,6 +227,12 @@ window#wafflebar {
 .appmenu-popover entry {
     margin-bottom: 4px;
 }
+/* volume: the bar button + the host-rendered mixer popover (slider + mute). */
+.volume-mixer {
+    background-color: #2e3440;
+    color: #d8dee9;
+    min-width: 220px;
+}
 
 /* notifications: top-right popups; a left accent encodes urgency (same shape across themes). */
 .notifications {

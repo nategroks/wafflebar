@@ -12,7 +12,10 @@ use wafflebar_core::{
     ActionId, Event, Plugin, Reaction, Topic, View, VolumeCommand, VolumeEvent, VOLUME_NORM,
 };
 
-const ACTION_TOGGLE: &str = "toggle-mute";
+// Click opens the host-attached mixer popover (slider + mute) — the host owns that interaction
+// (it needs GTK + the volume sink), so the plugin's click is an inert sentinel; the trigger stays a
+// Button only for the scroll affordance + display. Mute now lives in the mixer, not a click-toggle.
+const ACTION_OPEN: &str = "open-mixer";
 const ACTION_UP: &str = "vol-up";
 const ACTION_DOWN: &str = "vol-down";
 const STEP_PERCENT: i32 = 5;
@@ -85,7 +88,7 @@ impl Plugin for Volume {
             ],
             4,
         )
-        .button(ActionId::new(ACTION_TOGGLE))
+        .button(ActionId::new(ACTION_OPEN))
         .with_scroll(ActionId::new(ACTION_UP), ActionId::new(ACTION_DOWN))
         .with_class("module")
         .with_class("volume")
@@ -115,7 +118,8 @@ impl Plugin for Volume {
 
     fn on_action(&mut self, action: &ActionId) -> Reaction {
         match action.0.as_str() {
-            ACTION_TOGGLE => Reaction::volume(VolumeCommand::ToggleMute),
+            // The click is handled host-side (opens the mixer popover); nothing to do here.
+            ACTION_OPEN => Reaction::none(),
             ACTION_UP => Reaction::volume(VolumeCommand::Adjust { delta: STEP_PERCENT }),
             ACTION_DOWN => Reaction::volume(VolumeCommand::Adjust { delta: -STEP_PERCENT }),
             _ => Reaction::none(),
@@ -185,10 +189,8 @@ mod tests {
     #[test]
     fn actions_map_to_commands() {
         let mut v = Volume::new();
-        assert_eq!(
-            v.on_action(&ActionId::new(ACTION_TOGGLE)).volume,
-            vec![VolumeCommand::ToggleMute]
-        );
+        // Click is inert at the plugin level (the host's mixer popover owns it).
+        assert!(v.on_action(&ActionId::new(ACTION_OPEN)).volume.is_empty());
         assert_eq!(
             v.on_action(&ActionId::new(ACTION_UP)).volume,
             vec![VolumeCommand::Adjust { delta: 5 }]

@@ -51,6 +51,9 @@ pub struct Host {
     /// unless an `appmenu` plugin is present and `app.rs` populates it. The menu widget reads it at
     /// render time; the directory watch refreshes it and re-renders.
     menu: Rc<RefCell<crate::menu::MenuState>>,
+    /// Latest default-sink `(percent, muted)` mirrored from `VolumeEvent`s, so the volume mixer
+    /// popover can seed its slider with the current level when opened. `None` until the first event.
+    volume_state: std::cell::Cell<Option<(u8, bool)>>,
 }
 
 impl Host {
@@ -72,6 +75,7 @@ impl Host {
             position: std::cell::Cell::new(position),
             icon_size: std::cell::Cell::new(icon_size),
             menu: Rc::new(RefCell::new(crate::menu::MenuState::default())),
+            volume_state: std::cell::Cell::new(None),
         })
     }
 
@@ -83,6 +87,109 @@ impl Host {
     /// The bar's current edge (used to anchor dropdowns above/below the bar).
     pub fn position(&self) -> Position {
         self.position.get()
+    }
+
+    /// Attach a volume-mixer popover to every `volume` slot's container (host-side, like the clock
+    /// calendar). Click the volume module → a popover with a level slider + mute toggle. The popover
+    /// is `set_parent`'d to the persistent container so it survives the trigger's re-render; opening
+    /// it seeds the slider from the mirrored sink level. Re-run after a structural rebuild (fresh
+    /// containers). A click-only popover (no keyboard) works fine on dwl — unlike the typing dropdowns.
+    pub fn attach_volume_mixers(self: &Rc<Self>) {
+        let containers: Vec<gtk4::Box> = self
+            .slots
+            .borrow()
+            .iter()
+            .filter(|s| s.kind == "volume")
+            .map(|s| s.container.clone())
+            .collect();
+        for container in containers {
+            self.attach_volume_mixer(&container);
+        }
+    }
+
+    fn attach_volume_mixer(self: &Rc<Self>, container: &gtk4::Box) {
+        let (body, seed) = self.build_mixer_body();
+
+        let popover = Popover::new();
+        popover.set_child(Some(&body));
+        popover.set_autohide(true);
+        popover.set_position(match self.position.get() {
+            Position::Top => gtk4::PositionType::Bottom,
+            Position::Bottom => gtk4::PositionType::Top,
+        });
+        popover.set_parent(container);
+        popover.connect_show(move |_| seed()); // re-seed the slider/mute from the live level on open
+
+        let gesture = GestureClick::new();
+        gesture.set_button(gdk::BUTTON_PRIMARY);
+        gesture.connect_released(move |_, _, _, _| popover.popup());
+        container.add_controller(gesture);
+    }
+
+    /// Build the mixer body (level slider + mute toggle), returning it and a `seed` closure that
+    /// refreshes its widgets from the mirrored sink level. The slider drives `set_volume`; the button
+    /// drives `toggle_mute`. Shared by the popover and (in tests) a standalone window.
+    fn build_mixer_body(self: &Rc<Self>) -> (gtk4::Box, impl Fn()) {
+        use gtk4::{Button, Label, Scale};
+
+        let body = gtk4::Box::new(Orientation::Vertical, 6);
+        body.set_margin_top(8);
+        body.set_margin_bottom(8);
+        body.set_margin_start(8);
+        body.set_margin_end(8);
+        body.add_css_class("volume-mixer");
+
+        let scale = Scale::with_range(Orientation::Horizontal, 0.0, 100.0, 1.0);
+        scale.set_hexpand(true);
+        scale.set_width_request(180);
+        scale.set_draw_value(true);
+        scale.set_value_pos(gtk4::PositionType::Right);
+        let mute = Button::new();
+
+        // `updating` suppresses the slider's own change-signal while we seed it programmatically,
+        // so a refresh never echoes back to the backend as a redundant SetVolume.
+        let updating = Rc::new(std::cell::Cell::new(false));
+        scale.connect_value_changed({
+            let (host, updating) = (self.clone(), updating.clone());
+            move |s| {
+                if !updating.get() {
+                    host.set_volume(s.value().round() as u8);
+                }
+            }
+        });
+        mute.connect_clicked({
+            let host = self.clone();
+            move |_| host.toggle_mute()
+        });
+
+        let row = gtk4::Box::new(Orientation::Horizontal, 6);
+        row.append(&mute);
+        row.append(&scale);
+        body.append(&Label::new(Some("Volume")));
+        body.append(&row);
+
+        let seed = {
+            let (host, scale, mute, updating) = (self.clone(), scale.clone(), mute.clone(), updating.clone());
+            move || {
+                let (percent, muted) = host.volume_state.get().unwrap_or((0, false));
+                updating.set(true);
+                scale.set_value(percent as f64);
+                updating.set(false);
+                mute.set_label(if muted { "Unmute" } else { "Mute" });
+            }
+        };
+        seed(); // initial state at build time
+        (body, seed)
+    }
+
+    /// Set the default sink's volume to an absolute percent (the mixer slider).
+    pub fn set_volume(&self, percent: u8) {
+        (self.volume_sink)(&VolumeCommand::SetVolume { percent });
+    }
+
+    /// Toggle mute on the default sink (the mixer's mute button).
+    pub fn toggle_mute(&self) {
+        (self.volume_sink)(&VolumeCommand::ToggleMute);
     }
 
     /// The effective icon pixel size for bar glyphs (see the `icon_size` field).
@@ -126,6 +233,13 @@ impl Host {
 
     /// Deliver an event to every module; re-render the ones that report dirty.
     pub fn deliver_event(self: &Rc<Self>, ev: &Event) {
+        // Mirror the default-sink level so an open (or next-opened) mixer popover seeds correctly.
+        if let Event::Volume(wafflebar_core::VolumeEvent::SinkVolumeChanged { volume, muted, .. }) = ev {
+            let percent = (((*volume as u64) * 100 + (wafflebar_core::VOLUME_NORM as u64) / 2)
+                / (wafflebar_core::VOLUME_NORM as u64))
+                .min(100) as u8;
+            self.volume_state.set(Some((percent, *muted)));
+        }
         let n = self.slots.borrow().len();
         for i in 0..n {
             let reaction = {
