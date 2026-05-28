@@ -32,6 +32,9 @@ pub struct BtDevice {
     pub paired: bool,
     /// Whether it is currently connected.
     pub connected: bool,
+    /// Battery charge 0..=100 if the device reports one (BlueZ `Battery1.Percentage`); `None` if it
+    /// has no battery service (most don't) or isn't connected.
+    pub battery: Option<u8>,
 }
 
 /// A command the Bluetooth plugin issues; the host's BlueZ backend performs it.

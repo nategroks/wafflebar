@@ -74,8 +74,9 @@ fn menu(s: &BluetoothState) -> View {
                     (true, false) => "○ ",
                     (false, _) => "+ ", // discovered, not yet paired
                 };
+                let battery = d.battery.map(|b| format!("  {b}%")).unwrap_or_default();
                 children.push(
-                    View::label(format!("{mark}{}", d.name))
+                    View::label(format!("{mark}{}{battery}", d.name))
                         .with_class("bt-menu-item")
                         .button(ActionId::new(format!("{PFX_DEV}{}", d.path))),
                 );
@@ -153,10 +154,10 @@ mod tests {
         BluetoothState { present, powered, discovering: false, devices }
     }
     fn dev(path: &str, name: &str, connected: bool) -> BtDevice {
-        BtDevice { path: path.into(), name: name.into(), paired: true, connected }
+        BtDevice { path: path.into(), name: name.into(), paired: true, connected, battery: None }
     }
     fn discovered(path: &str, name: &str) -> BtDevice {
-        BtDevice { path: path.into(), name: name.into(), paired: false, connected: false }
+        BtDevice { path: path.into(), name: name.into(), paired: false, connected: false, battery: None }
     }
 
     #[test]
@@ -220,6 +221,33 @@ mod tests {
             b.on_action(&ActionId::new(ACTION_SCAN)).bluetooth,
             vec![BluetoothCommand::SetDiscovering(true)]
         );
+    }
+
+    #[test]
+    fn battery_percent_shows_in_the_device_row() {
+        let mut b = Bluetooth::new();
+        let d = BtDevice {
+            path: "/d".into(),
+            name: "Buds".into(),
+            paired: true,
+            connected: true,
+            battery: Some(85),
+        };
+        b.on_event(&Event::Bluetooth(state(true, true, vec![d])));
+        // dig out the device-row label text from the popover content Col.
+        let View::Popover { content, .. } = b.view() else { panic!("popover") };
+        let View::Col { children, .. } = *content else { panic!("col") };
+        let labels: Vec<String> = children
+            .iter()
+            .filter_map(|c| match c {
+                View::Button { child, .. } => match &**child {
+                    View::Label { text, .. } => Some(text.clone()),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .collect();
+        assert!(labels.iter().any(|t| t.contains("Buds") && t.contains("85%")), "got {labels:?}");
     }
 
     #[test]
