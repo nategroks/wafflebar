@@ -13,8 +13,8 @@ use gtk4::{gdk, GestureClick, Orientation, Popover, Separator};
 use tracing::debug;
 use wafflebar_core::reconcile::child_key;
 use wafflebar_core::{
-    diff_children, ActionId, ChildPatch, Event, Launch, ListPatch, MenuItem, Plugin, Position,
-    Reaction, SeparatorStyle, Topic, TrayCommand, View, VolumeCommand, WmCommand,
+    diff_children, ActionId, BluetoothCommand, ChildPatch, Event, Launch, ListPatch, MenuItem,
+    Plugin, Position, Reaction, SeparatorStyle, Topic, TrayCommand, View, VolumeCommand, WmCommand,
 };
 
 /// One placed module: its kind (for logging), the boxed reducer, and the host-owned container
@@ -39,6 +39,8 @@ pub struct Host {
     volume_sink: Box<dyn Fn(&VolumeCommand)>,
     /// Where `TrayCommand`s go (wired to the SNI backend, or a no-op when none is running).
     tray_sink: Box<dyn Fn(&TrayCommand)>,
+    /// Where `BluetoothCommand`s go (wired to the BlueZ backend, or a no-op when none is running).
+    bluetooth_sink: Box<dyn Fn(&BluetoothCommand)>,
     /// The bar's edge. Popovers open away from it (read at render time so a Phase F edge change is
     /// picked up without a stale cached anchor). `Cell` so a live `[bar]` reposition (F2c) can update
     /// it without rebuilding the host.
@@ -57,12 +59,15 @@ pub struct Host {
 }
 
 impl Host {
+    #[allow(clippy::too_many_arguments)] // a constructor wiring one sink per backend; grouping them
+    // into a struct would just move the arg list there. Stays explicit.
     pub fn new(
         slots: Vec<PluginSlot>,
         command_sink: Box<dyn Fn(&WmCommand)>,
         launch_sink: Box<dyn Fn(&Launch)>,
         volume_sink: Box<dyn Fn(&VolumeCommand)>,
         tray_sink: Box<dyn Fn(&TrayCommand)>,
+        bluetooth_sink: Box<dyn Fn(&BluetoothCommand)>,
         position: Position,
         icon_size: u32,
     ) -> Rc<Self> {
@@ -72,6 +77,7 @@ impl Host {
             launch_sink,
             volume_sink,
             tray_sink,
+            bluetooth_sink,
             position: std::cell::Cell::new(position),
             icon_size: std::cell::Cell::new(icon_size),
             menu: Rc::new(RefCell::new(crate::menu::MenuState::default())),
@@ -346,6 +352,9 @@ impl Host {
         }
         for cmd in &reaction.tray {
             (self.tray_sink)(cmd);
+        }
+        for cmd in &reaction.bluetooth {
+            (self.bluetooth_sink)(cmd);
         }
         if reaction.dirty {
             self.rerender(slot);
@@ -840,6 +849,7 @@ mod tests {
             Box::new(|_: &Launch| {}),
             Box::new(|_: &VolumeCommand| {}),
             Box::new(|_: &TrayCommand| {}),
+            Box::new(|_: &wafflebar_core::BluetoothCommand| {}),
             Position::Top,
             18,
         )

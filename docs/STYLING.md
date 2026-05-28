@@ -45,7 +45,9 @@ right-click menu via the shared `.wb-menu` / `.wb-menu-item`.
 
 **cpu** — `.cpu`, `.cpu-icon`, `.cpu-label`. **memory** — `.memory`, `.mem-icon`, `.mem-label`, and
 `.swapping`. **network** — `.network`, `.net-icon`, `.net-label`. **volume** — `.volume`, `.vol-icon`,
-`.vol-label`, and `.muted`. (cpu/memory carry the shared load buckets below.)
+`.vol-label`, and `.muted`. **bluetooth** — `.bluetooth`, `.bt-icon`, and the click-out menu
+`.bt-menu` with `.bt-menu-power` (the toggle row) / `.bt-menu-item` (device rows). (cpu/memory carry
+the shared load buckets below.)
 
 **showdesktop** — `.wb-showdesktop`; `.active` when engaged.
 

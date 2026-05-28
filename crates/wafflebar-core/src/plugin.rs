@@ -7,6 +7,7 @@
 //! serializable and makes the eventual external-process step a transport wrapper, not a rewrite.
 
 use crate::audio::{VolumeCommand, VolumeEvent};
+use crate::bluetooth::{BluetoothCommand, BluetoothState};
 use crate::config::ModuleConfig;
 use crate::cpu::CpuState;
 use crate::freedesktop::Launch;
@@ -40,6 +41,9 @@ pub enum Topic {
     /// StatusNotifier (system tray) item changes. The host starts the SNI backend only if some
     /// plugin subscribes to this.
     Tray,
+    /// Bluetooth (adapter power + paired-device connection) changes. The host starts the BlueZ
+    /// backend only if some plugin subscribes to this.
+    Bluetooth,
 }
 
 /// An event delivered to a subscribed module.
@@ -59,6 +63,8 @@ pub enum Event {
     Cpu(CpuState),
     /// The current tray item list from the host's SNI backend (full snapshot on any change).
     Tray(Vec<TrayItem>),
+    /// The current Bluetooth state from the host's BlueZ backend (full snapshot on any change).
+    Bluetooth(BluetoothState),
 }
 
 /// A module's response to an event or action: whether its view changed, plus any side effects
@@ -79,6 +85,8 @@ pub struct Reaction {
     pub volume: Vec<VolumeCommand>,
     /// Tray commands for the host's SNI backend (e.g. activate an item).
     pub tray: Vec<TrayCommand>,
+    /// Bluetooth commands for the host's BlueZ backend (power toggle, connect/disconnect).
+    pub bluetooth: Vec<BluetoothCommand>,
 }
 
 impl Reaction {
@@ -125,6 +133,13 @@ impl Reaction {
     pub fn tray(cmd: TrayCommand) -> Self {
         Self {
             tray: vec![cmd],
+            ..Self::default()
+        }
+    }
+    /// Issue one Bluetooth command.
+    pub fn bluetooth(cmd: BluetoothCommand) -> Self {
+        Self {
+            bluetooth: vec![cmd],
             ..Self::default()
         }
     }

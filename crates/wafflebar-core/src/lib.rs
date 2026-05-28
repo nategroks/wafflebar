@@ -15,6 +15,7 @@
 //! widget tree, runs the GLib main loop, and provides the concrete compositor backends.
 
 pub mod audio;
+pub mod bluetooth;
 pub mod config;
 pub mod cpu;
 pub mod fake;
@@ -37,6 +38,7 @@ pub use config::{
     Position, SCHEMA_VERSION,
 };
 pub use audio::{VolumeCommand, VolumeEvent, VOLUME_NORM};
+pub use bluetooth::{BluetoothCommand, BluetoothState, BtDevice};
 pub use cpu::CpuState;
 pub use freedesktop::{application_dirs, list_applications, DesktopAction, DesktopApp, Launch};
 pub use grid::{GridEngine, GridError, Placement};

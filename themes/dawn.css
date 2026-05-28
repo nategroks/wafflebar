@@ -179,6 +179,20 @@ window#wafflebar {
     color: #657b83;
 }
 
+/* bluetooth: bar icon + click-out menu. */
+.bluetooth .bt-icon {
+    color: #268bd2;
+}
+.bt-menu {
+    background-color: #fdf6e3;
+    color: #657b83;
+    padding: 6px;
+    min-width: 200px;
+}
+.bt-menu-power {
+    font-weight: bold;
+}
+
 .volume {
     padding: 0 6px;
 }
