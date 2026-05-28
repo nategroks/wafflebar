@@ -289,3 +289,30 @@ window#wafflebar {
     background-repeat: repeat-y;
     background-position: center;
 }
+
+/* settings window — themed to match the apps menu (Solarized light). */
+.settings {
+    background-color: #fdf6e3;
+    color: #657b83;
+}
+.settings row:selected {
+    background-color: #eee8d5;
+    color: #073642;
+}
+.settings entry,
+.settings spinbutton {
+    background-color: #eee8d5;
+    color: #073642;
+}
+.settings button {
+    background-color: #eee8d5;
+    color: #657b83;
+    border-radius: 4px;
+}
+.settings button:hover {
+    background-color: #93a1a1;
+}
+.settings button.destructive-action {
+    background-color: #dc322f;
+    color: #fdf6e3;
+}

@@ -249,6 +249,7 @@ fn open_at(config_path: &Path, select: Option<usize>) {
     header.append(&close);
 
     let root = gtk4::Box::new(Orientation::Vertical, 0);
+    root.add_css_class("settings"); // themed (nord/dawn) to match the apps menu, not native GTK
     root.append(&header);
     root.append(&split);
     window.set_child(Some(&root));
