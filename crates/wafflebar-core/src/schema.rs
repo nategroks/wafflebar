@@ -27,6 +27,9 @@ pub struct ConfigField {
 pub enum FieldKind {
     /// Free text → a `gtk::Entry`.
     Text { default: String },
+    /// Like [`Text`](FieldKind::Text), plus a "Browse…" button that opens a file chooser — for a
+    /// value that may be a name *or* a file path (e.g. an icon: a theme name or a PNG/SVG path).
+    File { default: String },
     /// Bounded integer → a `gtk::SpinButton`.
     Int { min: i64, max: i64, default: i64 },
     /// On/off → a `gtk::Switch`.
@@ -46,6 +49,11 @@ pub enum FieldKind {
 impl ConfigField {
     pub fn text(key: &str, label: &str, default: &str) -> Self {
         Self { key: key.into(), label: label.into(), kind: FieldKind::Text { default: default.into() } }
+    }
+
+    /// Text entry + a "Browse…" file chooser (for a name-or-path value, e.g. an icon).
+    pub fn file(key: &str, label: &str, default: &str) -> Self {
+        Self { key: key.into(), label: label.into(), kind: FieldKind::File { default: default.into() } }
     }
 
     pub fn int(key: &str, label: &str, min: i64, max: i64, default: i64) -> Self {

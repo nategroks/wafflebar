@@ -243,6 +243,47 @@ fn field_row(field: &ConfigField, target: Target, config: &Config, ctx: &Ctx) ->
             entry.add_controller(focus);
             row.append(&entry);
         }
+        FieldKind::File { default } => {
+            // Entry (accepts a theme name or a path) + a Browse… file chooser that fills the path.
+            let entry = Entry::new();
+            entry.set_hexpand(true);
+            entry.set_text(&current_str(config, target, &field.key).unwrap_or_else(|| default.clone()));
+            let commit = {
+                let (path, key, entry) = (path.clone(), field.key.clone(), entry.clone());
+                move || write_value(&path, target, &key, entry.text().as_str().into())
+            };
+            entry.connect_activate({
+                let commit = commit.clone();
+                move |_| commit()
+            });
+            let focus = EventControllerFocus::new();
+            focus.connect_leave({
+                let commit = commit.clone();
+                move |_| commit()
+            });
+            entry.add_controller(focus);
+
+            let browse = Button::with_label("Browse…");
+            browse.connect_clicked({
+                let (entry, commit) = (entry.clone(), commit.clone());
+                move |btn| {
+                    let dialog = gtk4::FileDialog::builder().title("Choose an icon image").build();
+                    let win = btn.root().and_downcast::<gtk4::Window>();
+                    let (entry, commit) = (entry.clone(), commit.clone());
+                    dialog.open(win.as_ref(), gtk4::gio::Cancellable::NONE, move |res| {
+                        if let Some(p) = res.ok().and_then(|f| f.path()) {
+                            entry.set_text(&p.to_string_lossy());
+                            commit();
+                        }
+                    });
+                }
+            });
+
+            let hbox = gtk4::Box::new(Orientation::Horizontal, 6);
+            hbox.append(&entry);
+            hbox.append(&browse);
+            row.append(&hbox);
+        }
         FieldKind::Int { min, max, default } => {
             let cur = current_int(config, target, &field.key).unwrap_or(*default);
             let spin = SpinButton::with_range(*min as f64, *max as f64, 1.0);
@@ -623,7 +664,7 @@ fn append_module(path: &Path, kind: &str, col: u32) {
         table["cell"] = toml_edit::value(cell);
         for field in plugins::config_schema(kind) {
             match field.kind {
-                FieldKind::Text { default } if !default.is_empty() => {
+                FieldKind::Text { default } | FieldKind::File { default } if !default.is_empty() => {
                     table[&field.key] = toml_edit::value(default)
                 }
                 FieldKind::Int { default, .. } => table[&field.key] = toml_edit::value(default),
