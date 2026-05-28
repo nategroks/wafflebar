@@ -272,12 +272,17 @@ fn apply_children(
     slot: usize,
     host: &Rc<Host>,
 ) {
-    // Collect the current widgets in order; they line up with `old`.
+    // Collect the current widgets in order; they line up with `old`. Skip popups (e.g. the clock's
+    // calendar popover, which is `set_parent`'d to the slot container): a popover is a child in the
+    // widget tree but not a laid-out child, so the keyed diff must neither count nor remove it —
+    // that's what lets a host-attached popover survive the per-tick re-render with its open state.
     let mut old_widgets = Vec::with_capacity(old.len());
     let mut cur = parent.first_child();
     while let Some(w) = cur {
         cur = w.next_sibling();
-        old_widgets.push(w);
+        if w.downcast_ref::<Popover>().is_none() {
+            old_widgets.push(w);
+        }
     }
 
     // If reality and our cached view ever disagree, fall back to a clean full rebuild rather than
