@@ -13,7 +13,7 @@ use gtk4_layer_shell::{Edge, Layer, LayerShell};
 use tracing::{debug, info, warn};
 use wafflebar_core::{
     Align, Config, Event, GridEngine, Launch, Position, Topic, TrayCommand, VolumeCommand,
-    WindowManager, WmCommand,
+    WmCommand,
 };
 
 use crate::event_loop;
@@ -24,7 +24,7 @@ use crate::plugins::network::backend::{NetworkBackend, NmBackend};
 use crate::plugins::statustray::backend::SniBackend;
 use crate::plugins::volume::backend::PulseBackend;
 use crate::render::{Host, PluginSlot};
-use crate::wm::DwlBackend;
+use crate::wm::{connect_backend, WmConnection};
 
 /// Built-in Nord theme used when the config doesn't point at a CSS file.
 const DEFAULT_CSS: &str = include_str!("../../../themes/nord.css");
@@ -57,18 +57,9 @@ pub fn build_bars(
         }
     });
 
-    // One Wayland backend connection, shared across bars. None on non-dwl sessions (the bar
-    // still runs; WM-driven modules just stay empty).
-    let backend = match DwlBackend::connect() {
-        Ok(b) => {
-            info!("dwl backend connected");
-            Some(Rc::new(RefCell::new(b)))
-        }
-        Err(e) => {
-            warn!(error = %e, "dwl backend unavailable; tags/window will be empty");
-            None
-        }
-    };
+    // One compositor connection, shared across bars (dwl today; sway in PR-B). `None` on an
+    // unsupported session — the bar still runs, WM-driven modules just stay empty.
+    let backend = connect_backend();
 
     let monitors = display.monitors();
     let mut mons: Vec<gdk::Monitor> = Vec::new();
@@ -128,7 +119,7 @@ fn present_bar(
     monitor: Option<&gdk::Monitor>,
     config: &Config,
     engine: &GridEngine,
-    backend: &Option<Rc<RefCell<DwlBackend>>>,
+    backend: &Option<Rc<RefCell<dyn WmConnection>>>,
     config_path: Option<&std::path::Path>,
 ) {
     let output_name = monitor
@@ -318,7 +309,7 @@ fn build_grid_and_host(
     config: &Config,
     engine: &GridEngine,
     output: &str,
-    backend: Option<Rc<RefCell<DwlBackend>>>,
+    backend: Option<Rc<RefCell<dyn WmConnection>>>,
 ) -> BuiltBar {
     // Backend capabilities, queried once at init and handed to every plugin at construction. If a
     // future backend gains dynamic capabilities, lift this to a WmEvent::CapsChanged.

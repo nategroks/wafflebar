@@ -12,6 +12,8 @@ use std::os::fd::{AsFd, AsRawFd, RawFd};
 use anyhow::{bail, Result};
 use tracing::debug;
 use wafflebar_core::{Tag, TagState, Window, WindowId, WindowManager, WmCommand, WmEvent};
+
+use super::WmConnection;
 use wayland_client::protocol::wl_output::{self, WlOutput};
 use wayland_client::protocol::wl_registry::{self, WlRegistry};
 use wayland_client::protocol::wl_seat::{self, WlSeat};
@@ -155,9 +157,11 @@ impl DwlBackend {
         Ok(Self { conn, queue, state })
     }
 
-    /// Raw fd, ready for true fd-readable integration (calloop / g_unix_fd_add) — see app.rs.
-    #[allow(dead_code)]
-    pub fn fd(&self) -> RawFd {
+}
+
+impl WmConnection for DwlBackend {
+    /// Raw fd the host watches (GLib `g_unix_fd_add` — see app.rs).
+    fn fd(&self) -> RawFd {
         self.conn.as_fd().as_raw_fd()
     }
 
@@ -167,7 +171,7 @@ impl DwlBackend {
     /// events are already queued — then we just `dispatch_pending`. When it returns a guard, the
     /// fd has been signalled readable by GLib, so `read()` won't block; then `dispatch_pending`.
     /// We also `flush()` first so our outgoing requests are on the wire.
-    pub fn dispatch(&mut self) -> Vec<WmEvent> {
+    fn dispatch(&mut self) -> Vec<WmEvent> {
         // TODO(backpressure): flush errors (incl. EAGAIN when the compositor socket is full) are
         // ignored here, as they were under the poll loop. Real handling — queue + retry on
         // writable — is its own discussion; unchanged in C3 on purpose.
