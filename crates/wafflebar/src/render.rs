@@ -175,11 +175,15 @@ impl Host {
         body.append(&row);
 
         // Equalizer: a DSP EQ isn't part of the volume API — the standard PipeWire equalizer is the
-        // EasyEffects app, which inserts itself into the audio graph. The mixer just launches it.
-        let eq = Button::with_label("Equalizer…");
-        eq.add_css_class("mixer-eq");
-        eq.connect_clicked(|_| spawn(&["easyeffects".to_string()]));
-        body.append(&eq);
+        // EasyEffects app (or older PulseEffects), which inserts itself into the audio graph. The
+        // mixer just launches it — and only shows the button when such an app is actually installed,
+        // so it's never a dead control (install media-sound/easyeffects to get it).
+        if let Some(app) = ["easyeffects", "pulseeffects"].into_iter().find(|b| on_path(b)) {
+            let eq = Button::with_label("Equalizer…");
+            eq.add_css_class("mixer-eq");
+            eq.connect_clicked(move |_| spawn(&[app.to_string()]));
+            body.append(&eq);
+        }
 
         let seed = {
             let (host, scale, mute, updating) = (self.clone(), scale.clone(), mute.clone(), updating.clone());
@@ -818,6 +822,14 @@ fn spawn(argv: &[String]) {
             debug!(?argv, error = %e, "spawn failed");
         }
     }
+}
+
+/// Whether `bin` is an executable on `$PATH` (so optional integrations like the EQ app only show
+/// their control when the program is actually installed).
+fn on_path(bin: &str) -> bool {
+    std::env::var_os("PATH").is_some_and(|path| {
+        std::env::split_paths(&path).any(|dir| dir.join(bin).is_file())
+    })
 }
 
 #[cfg(test)]
