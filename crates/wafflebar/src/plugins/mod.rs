@@ -38,7 +38,7 @@ pub fn build(kind: &str, output: &str, cfg: &ModuleConfig, caps: &Caps) -> Box<d
         "separator" => Box::new(separator::Separator::new(cfg)),
         "showdesktop" => Box::new(showdesktop::ShowDesktop::new(caps)),
         "volume" => Box::new(volume::Volume::new()),
-        "network" => Box::new(network::Network::new()),
+        "network" => Box::new(network::Network::new(network::read_max_chars(cfg))),
         "memory" => Box::new(memory::Memory::new()),
         "cpu" => Box::new(cpu::Cpu::new()),
         "statustray" => Box::new(statustray::StatusTray::new()),

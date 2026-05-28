@@ -8,11 +8,11 @@ use std::rc::Rc;
 use gtk4::gdk;
 use gtk4::glib;
 use gtk4::prelude::*;
-use gtk4::{Application, ApplicationWindow, Grid, Orientation};
+use gtk4::{Application, ApplicationWindow, CenterBox, Grid, Orientation};
 use gtk4_layer_shell::{Edge, Layer, LayerShell};
 use tracing::{debug, info, warn};
 use wafflebar_core::{
-    Align, Config, Event, GridEngine, Launch, Position, Topic, TrayCommand, VolumeCommand,
+    Align, Config, Event, GridEngine, Launch, Layout, Position, Topic, TrayCommand, VolumeCommand,
     WmCommand,
 };
 
@@ -249,7 +249,73 @@ fn populate_grid(
     engine: &GridEngine,
     output: &str,
     caps: &plugins::Caps,
-) -> (Grid, Vec<PluginSlot>) {
+) -> (gtk4::Widget, Vec<PluginSlot>) {
+    // Pack is the default and the single-row case; an explicit grid or any multi-row track keeps the
+    // homogeneous-column layout (the grid model, retained as opt-in / for multi-row bars).
+    if config.bar.layout == Layout::Pack && engine.rows <= 1 {
+        populate_pack(config, engine, output, caps)
+    } else {
+        populate_grid_inner(config, engine, output, caps)
+    }
+}
+
+/// xfce4-panel-style packing: one `gtk4::CenterBox` whose start/center/end groups collect modules by
+/// [`Align`]. Modules are content-sized (no `hexpand`); CenterBox holds the start group flush-left,
+/// the end group flush-right, the center group centered, and absorbs the slack between them — so a
+/// long label grows its group inward instead of overflowing the bar. `cell`/`colspan` are ignored.
+fn populate_pack(
+    config: &Config,
+    engine: &GridEngine,
+    output: &str,
+    caps: &plugins::Caps,
+) -> (gtk4::Widget, Vec<PluginSlot>) {
+    let root = CenterBox::new();
+    root.set_hexpand(true);
+    root.set_widget_name("grid"); // keep the `#grid` CSS selector stable across both layouts
+
+    let start = gtk4::Box::new(Orientation::Horizontal, 0);
+    let center = gtk4::Box::new(Orientation::Horizontal, 0);
+    let end = gtk4::Box::new(Orientation::Horizontal, 0);
+    start.set_halign(gtk4::Align::Start);
+    center.set_halign(gtk4::Align::Center);
+    end.set_halign(gtk4::Align::End);
+
+    // `engine.placements` is in declaration order; bucket by align so order is preserved within each
+    // group. `Fill` has no packed meaning, so it groups with `Start`.
+    let mut slots = Vec::with_capacity(engine.placements.len());
+    for placement in &engine.placements {
+        let mcfg = &config.modules[placement.index];
+        let module = plugins::build(&placement.kind, output, mcfg, caps);
+        let container = gtk4::Box::new(Orientation::Horizontal, 0);
+        container.set_valign(gtk4::Align::Center);
+        let group = match placement.align {
+            Align::Center => &center,
+            Align::End => &end,
+            Align::Start | Align::Fill => &start,
+        };
+        group.append(&container);
+        slots.push(PluginSlot {
+            kind: placement.kind.clone(),
+            module,
+            container,
+            last_view: None,
+        });
+    }
+
+    root.set_start_widget(Some(&start));
+    root.set_center_widget(Some(&center));
+    root.set_end_widget(Some(&end));
+    (root.upcast(), slots)
+}
+
+/// The grid layout: a homogeneous `rows × columns` track with per-module `cell` placement and
+/// hexpanding fillers for empty columns. Used for `layout = "grid"` and any multi-row config.
+fn populate_grid_inner(
+    config: &Config,
+    engine: &GridEngine,
+    output: &str,
+    caps: &plugins::Caps,
+) -> (gtk4::Widget, Vec<PluginSlot>) {
     let grid = Grid::builder()
         .hexpand(true)
         .column_homogeneous(true)
@@ -295,7 +361,7 @@ fn populate_grid(
         });
     }
 
-    (grid, slots)
+    (grid.upcast(), slots)
 }
 
 /// Build the grid + module slots, attach to the window, wire backends, and return the host that
