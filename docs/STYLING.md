@@ -12,12 +12,18 @@ hot-reload. See `docs/UPSTREAM.md`.
 
 | Selector | Conveys |
 |---|---|
-| `window#wafflebar` | the bar window — background, base color, font |
-| `#grid` | the placement grid |
+| `window#wafflebar` | the bar window — font + base color; **see paint-surface note below** |
+| `#grid` | the placement grid — **the bar's visible background surface; paint it here** |
 | `.module` | every plugin's container box |
 | `.wb-button` | generic clickable wrapper (on every `Button`) — hover affordance |
 | `.dim-label` | secondary/subtitle text and informational notes |
 | `.placeholder` | a not-yet-implemented module kind |
+
+**Paint the bar background on `#grid`, not `window#wafflebar`.** In a layer-shell bar the visible
+surface is the `#grid` container that holds the modules — it sits on top of the window node. A
+non-transparent system GTK theme paints `#grid`, covering any `background-color` set only on
+`window#wafflebar`, so a theme that paints just the window shows system-theme bleed-through. Set the
+bar background (and base text `color`) on `#grid`; `window#wafflebar` carries font/base only.
 
 ## Per-plugin
 
@@ -76,3 +82,20 @@ The preferences window (`prefs.rs`) is **not** themed by wafflebar — it inheri
 so it looks like a native settings dialog rather than the panel. Its widgets emit standard GTK classes
 (`window`, `entry`, `switch`, …); a user who wants to theme it can target those in their `theme.css`.
 This is a deliberate non-style decision.
+
+## Verifying a theme actually applies
+
+Theme changes must be verified against a system whose GTK theme is **distinct** from the wafflebar
+theme under test — otherwise a system theme that resembles the wafflebar theme masks
+theme-application bugs (this is how the original "themes never applied under the `v4_12` feature flag"
+bug stayed hidden: the dev host ran a system-wide Nord GTK theme that bled through). Practical rules:
+
+- **Don't trust `GTK_THEME=<name>` blindly.** GTK4 silently falls through to its compiled-in Adwaita
+  when a named theme lacks `gtk-4.0/gtk.css`. Take a control screenshot of a plain GTK window first to
+  confirm the baseline actually switched.
+- **Pixel-sample, don't eyeball.** Screenshot the bar (`grim`) and read the dominant background RGB;
+  compare against the theme's expected value (e.g. Nord `#2e3440`, Dawn `#fdf6e3`), not "looks close."
+- **Use a garish probe as the airtight discriminator.** A theme like `#grid { background: #00ffff; }`
+  produces a color no system theme would — if the bar is cyan, wafflebar's CSS definitively won.
+- **An empty theme file is the "no wafflebar CSS" baseline.** It shows the raw system surface, proving
+  the real themes do work rather than coinciding with the system.
