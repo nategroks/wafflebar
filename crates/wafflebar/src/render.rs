@@ -469,6 +469,11 @@ fn build_appmenu_dropdown(trigger: &View, content: &View, slot: usize, host: &Rc
     let content = content.clone();
     let host = host.clone();
     gesture.connect_released(move |_, _, _, _| {
+        // Toggle: a second click closes the open menu instead of stacking another grabbing surface.
+        if crate::dropdown::is_open() {
+            crate::dropdown::close_open();
+            return;
+        }
         let win = gtk4::Window::builder().default_width(420).default_height(520).build();
         crate::dropdown::panel(&win);
         win.set_child(Some(&render_view(&content, slot, &host)));
