@@ -74,6 +74,23 @@ module, is a hard error with a clear message.
 
 Module types that aren't implemented yet render a dim placeholder labelled with their type.
 
+### Icons
+
+wafflebar's own status/UI glyphs (apps-menu button, network, volume, cpu, memory, show-desktop)
+are **bundled Lucide icons** (`assets/icons/`, ISC-licensed) — shipped as recolorable `*-symbolic`
+SVGs that take their color from the theme, so they look consistent regardless of your system GTK
+icon theme. Real *application* icons (launcher items, tasklist windows, tray) still come from the
+system icon theme, so they stay recognizable.
+
+Any config key that takes an icon (e.g. the apps-menu `icon`) accepts **either** a theme icon name
+**or a file path** to a PNG/SVG (`~/` is expanded), so you can use a custom image:
+
+```toml
+[[modules]]
+type = "appmenu"
+icon = "~/.config/wafflebar/menu.png"   # or a name like "wb-appmenu-symbolic"
+```
+
 ## Example A — reproduce a waybar-style left/center/right bar
 
 ```toml

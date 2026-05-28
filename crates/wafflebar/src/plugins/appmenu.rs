@@ -7,7 +7,9 @@
 
 use wafflebar_core::{ActionId, ConfigField, Event, ModuleConfig, Plugin, Reaction, Topic, View};
 
-const DEFAULT_ICON: &str = "view-app-grid-symbolic";
+/// Default button glyph (bundled Lucide). `icon` may also be a file path (PNG/SVG) for a custom
+/// symbol — see the renderer's icon resolution.
+const DEFAULT_ICON: &str = "wb-appmenu-symbolic";
 const DEFAULT_MAX_RECENTS: i64 = 10;
 
 pub struct AppMenu {
@@ -72,7 +74,7 @@ impl Plugin for AppMenu {
 
     fn config_schema(&self) -> Vec<ConfigField> {
         vec![
-            ConfigField::text("icon", "Button icon", DEFAULT_ICON),
+            ConfigField::text("icon", "Button icon (theme name or PNG/SVG path)", DEFAULT_ICON),
             ConfigField::text("label", "Button text (blank = icon only)", ""),
             ConfigField::bool("show_recents", "Show recent applications", true),
             ConfigField::int("max_recents", "Recent applications shown", 0, 50, DEFAULT_MAX_RECENTS),

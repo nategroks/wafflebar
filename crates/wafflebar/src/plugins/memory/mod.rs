@@ -73,7 +73,7 @@ impl Plugin for Memory {
         };
         let mut row = View::row(
             vec![
-                View::icon("utilities-system-monitor", 16).with_class("mem-icon"),
+                View::icon("wb-mem-symbolic", 16).with_class("mem-icon"),
                 View::label(format!("{}%", d.pct)).with_class("mem-label"),
             ],
             4,

@@ -197,6 +197,7 @@ window#wafflebar {
 .wb-showdesktop {
     padding: 0 4px;
     border-radius: 4px;
+    color: #657b83; /* recolors the symbolic glyph */
 }
 .wb-showdesktop:hover {
     background-color: #eee8d5;
@@ -209,6 +210,7 @@ window#wafflebar {
 /* applications menu */
 .appmenu {
     padding: 0 6px;
+    color: #657b83; /* recolors the symbolic glyph (a PNG icon renders as-is) */
 }
 .appmenu-popover {
     background-color: #fdf6e3;

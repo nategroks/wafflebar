@@ -532,6 +532,12 @@ fn build_icon(
     theme_path: Option<&str>,
     pixmap: Option<&wafflebar_core::Pixmap>,
 ) -> gtk4::Image {
+    // A file path (PNG/SVG, optionally `~/`-relative) is loaded directly — lets a user point an
+    // icon (e.g. the appmenu button) at a custom image instead of a theme name. The caller sets
+    // `pixel_size`, so the image scales to the requested size.
+    if let Some(path) = icon_file_path(name) {
+        return gtk4::Image::from_file(path);
+    }
     if !name.is_empty() {
         if let Some(path) = theme_path {
             if let Some(img) = scoped_icon(name, size, path) {
@@ -547,6 +553,22 @@ fn build_icon(
         return image_from_pixmap(px);
     }
     gtk4::Image::from_icon_name(name)
+}
+
+/// If `name` denotes an image *file* (contains `/`, or ends `.png`/`.svg`/`.jpg`/`.jpeg`), return
+/// its expanded (`~/`) existing path; otherwise `None` (treat as a theme icon name).
+fn icon_file_path(name: &str) -> Option<std::path::PathBuf> {
+    let lower = name.to_ascii_lowercase();
+    let looks_like_path = name.contains('/')
+        || [".png", ".svg", ".jpg", ".jpeg"].iter().any(|e| lower.ends_with(e));
+    if !looks_like_path {
+        return None;
+    }
+    let path = match name.strip_prefix("~/") {
+        Some(rest) => std::path::PathBuf::from(std::env::var_os("HOME")?).join(rest),
+        None => std::path::PathBuf::from(name),
+    };
+    path.exists().then_some(path)
 }
 
 /// Whether `name` resolves in the current display's icon theme.
@@ -612,6 +634,20 @@ fn spawn(argv: &[String]) {
 mod tests {
     use super::*;
     use std::sync::Once;
+
+    #[test]
+    fn icon_file_path_detects_paths_not_theme_names() {
+        // Theme names (incl. our wb-* symbolic glyphs) are never treated as files.
+        assert_eq!(icon_file_path("wb-appmenu-symbolic"), None);
+        assert_eq!(icon_file_path("network-wired"), None);
+        // Path-like but missing → None (falls back to theme lookup).
+        assert_eq!(icon_file_path("/no/such/icon.png"), None);
+        // A real file is returned (path-like + exists).
+        let f = std::env::temp_dir().join("wb-icon-test.png");
+        std::fs::write(&f, b"x").unwrap();
+        assert_eq!(icon_file_path(f.to_str().unwrap()), Some(f.clone()));
+        std::fs::remove_file(&f).ok();
+    }
 
     static INIT: Once = Once::new();
     /// Initialize GTK once; returns false when there's no display (CI without a session) so the
