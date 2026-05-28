@@ -94,7 +94,7 @@ fn open_at(config_path: &Path, select: Option<usize>) {
     };
     let path = Rc::new(config_path.to_path_buf());
 
-    let window = Window::builder().default_width(620).default_height(460).build();
+    let window = Window::builder().default_width(760).default_height(460).build();
     dropdown::panel(&window, config.bar.position); // floating dropdown hugging the bar's edge
 
     let form = gtk4::Box::new(Orientation::Vertical, 8);
@@ -360,6 +360,7 @@ fn field_row(field: &ConfigField, target: Target, config: &Config, ctx: &Ctx) ->
     label.set_xalign(0.0);
     label.set_valign(Align::Start);
     label.set_hexpand(true);
+    label.set_wrap(true); // wrap a long label rather than pushing the control off the right edge
     row.append(&label);
     let path = &ctx.path;
 
