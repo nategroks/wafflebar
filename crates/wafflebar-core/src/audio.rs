@@ -35,4 +35,6 @@ pub enum VolumeCommand {
     ToggleMute,
     /// Change the default sink's volume by `delta` percentage points (clamped to 0..=100).
     Adjust { delta: i32 },
+    /// Set the default sink's volume to an absolute `percent` (0..=100) — the mixer slider.
+    SetVolume { percent: u8 },
 }

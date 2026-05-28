@@ -178,6 +178,12 @@ fn apply(context: &Rc<RefCell<Context>>, info: &SinkInfo, cmd: VolumeCommand) {
             volume.set(volume.len(), Volume(target));
             introspect.set_sink_volume_by_index(info.index, &volume, None);
         }
+        VolumeCommand::SetVolume { percent } => {
+            let target = ((VOLUME_NORM as u64) * percent.min(100) as u64 / 100) as u32;
+            let mut volume = info.volume;
+            volume.set(volume.len(), Volume(target));
+            introspect.set_sink_volume_by_index(info.index, &volume, None);
+        }
     }
 }
 

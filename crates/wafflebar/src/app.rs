@@ -207,6 +207,7 @@ fn present_bar(
                 let (grid, slots) = populate_grid(new_config, &engine, &output, &caps);
                 host.replace_slots(slots); // tears down outgoing plugins (teardown hook)
                 window.set_child(Some(&grid)); // drops the old grid and its containers
+                host.attach_volume_mixers(); // reattach to the fresh volume containers
                 timers.borrow_mut().reconcile(&host, memory_interval_secs(new_config));
 
                 // F2c: reconcile the backend-class backends (add-first starts, remove-last stops —
@@ -491,6 +492,9 @@ fn build_grid_and_host(
 
     // Start the backends the initial module set needs (re-run on every structural reload).
     reconcile_backends(&backends, &host, needs_audio, needs_network, needs_tray);
+
+    // Host-attached volume mixer popovers (needs the host + GTK, so it can't ride in populate).
+    host.attach_volume_mixers();
 
     // Clock-tick + memory/CPU-poll timers are owned by the TimerSet and (re)created by reconcile,
     // which both this initial build and every structural reload call — so there's exactly one
