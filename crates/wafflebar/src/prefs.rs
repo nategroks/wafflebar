@@ -47,6 +47,8 @@ struct Ctx {
     form: glib::WeakRef<gtk4::Box>,
     /// The bar edge, so nested pickers anchor to the same side as the Settings panel.
     position: Position,
+    /// `[bar] lock` — when set, structural edits (reorder/add/remove) are disabled in the UI.
+    locked: bool,
 }
 
 impl Ctx {
@@ -90,11 +92,13 @@ pub fn open(config_path: &Path) {
     form.set_margin_start(12);
     form.set_margin_end(12);
 
+    let locked = config.bar.lock;
     let ctx = Ctx {
         path,
         window: window.downgrade(),
         form: form.downgrade(),
         position: config.bar.position,
+        locked,
     };
 
     // Left: target list (Bar + each module) over Add / Remove-selected buttons.
@@ -105,43 +109,49 @@ pub fn open(config_path: &Path) {
     // navigation (clicking a row's label still drives the form; the checkbox only marks for delete).
     let checks: Rc<RefCell<Vec<CheckButton>>> = Rc::new(RefCell::new(Vec::new()));
     for (mi, m) in config.modules.iter().enumerate() {
-        let check = CheckButton::new();
-        check.set_valign(Align::Center);
-        let label = Label::new(Some(&format!("⠿  {}  ·  cell ({}, {})", m.kind, m.cell.row, m.cell.col)));
+        // Locked: no grip glyph, no checkbox, no drag — the row is just a navigable label.
+        let prefix = if locked { "" } else { "⠿  " };
+        let label = Label::new(Some(&format!("{prefix}{}  ·  cell ({}, {})", m.kind, m.cell.row, m.cell.col)));
         label.set_xalign(0.0);
         let hbox = gtk4::Box::new(Orientation::Horizontal, 6);
         hbox.set_margin_top(6);
         hbox.set_margin_bottom(6);
         hbox.set_margin_start(8);
         hbox.set_margin_end(8);
-        hbox.append(&check);
+        if !locked {
+            let check = CheckButton::new();
+            check.set_valign(Align::Center);
+            hbox.append(&check);
+            checks.borrow_mut().push(check);
+        }
         hbox.append(&label);
         let row = ListBoxRow::new();
         row.set_child(Some(&hbox));
-        checks.borrow_mut().push(check);
-        // Drag-to-reorder (P5): the row carries its module index; dropping it on another module row
-        // rewrites the `[[modules]]` order in the TOML, which the watcher reloads. The Bar row above
-        // has no source/target, so it's neither draggable nor a drop site.
-        let src = DragSource::new();
-        src.set_actions(gdk::DragAction::MOVE);
-        src.connect_prepare(move |_, _, _| {
-            Some(gdk::ContentProvider::for_value(&(mi as i32).to_value()))
-        });
-        row.add_controller(src);
-        let tgt = DropTarget::new(i32::static_type(), gdk::DragAction::MOVE);
-        tgt.connect_drop({
-            let ctx = ctx.clone();
-            move |_, val, _, _| {
-                let Ok(from) = val.get::<i32>() else { return false };
-                let from = from as usize;
-                if from != mi {
-                    move_module(&ctx.path, from, mi);
-                    ctx.reopen(); // rebuild the window so the list reflects the new order
+        if !locked {
+            // Drag-to-reorder (P5): the row carries its module index; dropping it on another module
+            // row rewrites the `[[modules]]` order in the TOML, which the watcher reloads. The Bar
+            // row above has no source/target, so it's neither draggable nor a drop site.
+            let src = DragSource::new();
+            src.set_actions(gdk::DragAction::MOVE);
+            src.connect_prepare(move |_, _, _| {
+                Some(gdk::ContentProvider::for_value(&(mi as i32).to_value()))
+            });
+            row.add_controller(src);
+            let tgt = DropTarget::new(i32::static_type(), gdk::DragAction::MOVE);
+            tgt.connect_drop({
+                let ctx = ctx.clone();
+                move |_, val, _, _| {
+                    let Ok(from) = val.get::<i32>() else { return false };
+                    let from = from as usize;
+                    if from != mi {
+                        move_module(&ctx.path, from, mi);
+                        ctx.reopen(); // rebuild the window so the list reflects the new order
+                    }
+                    true
                 }
-                true
-            }
-        });
-        row.add_controller(tgt);
+            });
+            row.add_controller(tgt);
+        }
         list.append(&row);
     }
     list.connect_row_selected({
@@ -191,8 +201,15 @@ pub fn open(config_path: &Path) {
     list_scroll.set_hscrollbar_policy(gtk4::PolicyType::Never);
     let left = gtk4::Box::new(Orientation::Vertical, 0);
     left.append(&list_scroll);
-    left.append(&add_btn);
-    left.append(&remove_btn);
+    if locked {
+        // Layout locked: no add/remove, and a hint why (unlock via the Bar form's "Lock layout").
+        let note = list_row("🔒  Layout locked");
+        note.set_selectable(false);
+        left.append(&note);
+    } else {
+        left.append(&add_btn);
+        left.append(&remove_btn);
+    }
 
     let split = gtk4::Box::new(Orientation::Horizontal, 0);
     split.set_vexpand(true);
@@ -278,7 +295,7 @@ fn build_form(form: &gtk4::Box, target: Target, ctx: &Ctx) {
             note.set_margin_top(8);
             form.append(&note);
         }
-        Target::Module(i) => {
+        Target::Module(i) if !ctx.locked => {
             let remove = Button::with_label("Remove this item");
             remove.add_css_class("destructive-action");
             remove.set_margin_top(12);
@@ -290,6 +307,7 @@ fn build_form(form: &gtk4::Box, target: Target, ctx: &Ctx) {
             });
             form.append(&remove);
         }
+        Target::Module(_) => {} // locked: field edits stay, but no remove
     }
 }
 
@@ -666,6 +684,7 @@ fn bar_config_schema() -> Vec<ConfigField> {
         ),
         ConfigField::bool("reserve_space", "Reserve screen space (strut)", true),
         ConfigField::bool("keep_below", "Keep below windows", false),
+        ConfigField::bool("lock", "Lock layout (no reorder/add/remove)", false),
         ConfigField::text("theme", "Theme CSS path (blank = built-in Nord)", ""),
     ]
 }
@@ -704,6 +723,7 @@ fn current_bool(config: &Config, target: Target, key: &str) -> Option<bool> {
         Target::Bar => match key {
             "reserve_space" => Some(config.bar.reserve_space),
             "keep_below" => Some(config.bar.keep_below),
+            "lock" => Some(config.bar.lock),
             _ => None,
         },
     }

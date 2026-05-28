@@ -27,6 +27,7 @@ schema = 1     # required-ish; defaults to the current version if omitted
 | `alignment` | `"start"` \| `"center"` \| `"end"` | `"center"` | where a shorter-than-full bar sits along its edge (ignored at `length_percent = 100`) |
 | `reserve_space` | bool | `true` | reserve screen space (strut) so tiled windows avoid the bar; `false` lets windows extend under it |
 | `keep_below` | bool | `false` | keep the bar below normal windows (layer `Bottom`) instead of above (`Top`) |
+| `lock` | bool | `false` | lock the layout — Settings disables drag-reorder / add / remove (field edits still work) |
 | `theme` | string | _(built-in Nord)_ | path to a GTK4 CSS file |
 
 ### `layout` — pack vs grid

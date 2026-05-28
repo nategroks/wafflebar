@@ -93,6 +93,10 @@ pub struct BarConfig {
     /// default). Pairs naturally with `reserve_space = false`.
     #[serde(default)]
     pub keep_below: bool,
+    /// Lock the layout: the preferences UI disables structural edits (drag-reorder, add, remove) so
+    /// the module set can't be changed by accident. Field edits still work.
+    #[serde(default)]
+    pub lock: bool,
     /// Optional path to a GTK CSS theme file.
     #[serde(default)]
     pub theme: Option<String>,
@@ -134,6 +138,7 @@ impl Default for BarConfig {
             alignment: Alignment::default(),
             reserve_space: true,
             keep_below: false,
+            lock: false,
             theme: None,
         }
     }
