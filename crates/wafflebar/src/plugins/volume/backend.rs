@@ -23,58 +23,28 @@ use wafflebar_core::{VolumeCommand, VolumeEvent, VOLUME_NORM};
 /// Sink set by the volume plugin; the backend invokes it on every derived audio change.
 type Handler = Rc<RefCell<Option<Box<dyn Fn(VolumeEvent)>>>>;
 
+/// How long to wait before rebuilding the libpulse connection after it drops (e.g. a PipeWire /
+/// pipewire-pulse restart). The retry loop is self-sustaining (see `configure_and_connect`).
+const RECONNECT_DELAY: std::time::Duration = std::time::Duration::from_secs(2);
+
 pub struct PulseBackend {
     context: Rc<RefCell<Context>>,
     // Kept alive: it owns the GSource attached to our GMainContext that drives libpulse callbacks.
-    _mainloop: Mainloop,
+    // `Rc` so the reconnect path can build a fresh context on the same mainloop.
+    _mainloop: Rc<Mainloop>,
     handler: Handler,
 }
 
 impl PulseBackend {
     /// Set up libpulse on the GLib default main context and begin connecting. Returns `None` only
     /// if libpulse can't be initialised at all; connection itself is async and a failure surfaces
-    /// later as [`VolumeEvent::Unavailable`] through the handler (so the plugin renders nothing).
+    /// later as [`VolumeEvent::Unavailable`] through the handler (so the plugin renders nothing) —
+    /// and then auto-reconnects (see `configure_and_connect`).
     pub fn new() -> Option<Self> {
-        let mainloop = Mainloop::new(None)?; // None → the default GMainContext, i.e. our loop
-        let context = Rc::new(RefCell::new(Context::new(&mainloop, "wafflebar")?));
+        let mainloop = Rc::new(Mainloop::new(None)?); // None → the default GMainContext, i.e. our loop
+        let context = Rc::new(RefCell::new(Context::new(&*mainloop, "wafflebar")?));
         let handler: Handler = Rc::new(RefCell::new(None));
-
-        // State callback: on Ready, subscribe + prime; on Failed/Terminated, report unavailable.
-        //
-        // libpulse calls this *synchronously* from inside Context methods (e.g. `connect`), which
-        // we invoke while holding `context.borrow_mut()`. Touching the context here would re-enter
-        // the RefCell and panic, so we defer the real work to a GLib idle tick — by then the borrow
-        // is released and we're back on a clean stack.
-        {
-            let ctx_weak = Rc::downgrade(&context);
-            let handler_cb = handler.clone();
-            context
-                .borrow_mut()
-                .set_state_callback(Some(Box::new(move || {
-                    let ctx_weak = ctx_weak.clone();
-                    let handler = handler_cb.clone();
-                    glib::idle_add_local_once(move || {
-                        let Some(ctx) = ctx_weak.upgrade() else { return };
-                        let state = ctx.borrow().get_state();
-                        match state {
-                            State::Ready => subscribe_and_prime(&ctx, &handler),
-                            State::Failed | State::Terminated => {
-                                emit(&handler, VolumeEvent::Unavailable)
-                            }
-                            _ => {}
-                        }
-                    });
-                })));
-        }
-
-        if context
-            .borrow_mut()
-            .connect(None, FlagSet::NOFLAGS, None)
-            .is_err()
-        {
-            warn!("volume: libpulse Context::connect failed; no audio backend");
-            return None;
-        }
+        configure_and_connect(&mainloop, &context, &handler)?;
         Some(Self { context, _mainloop: mainloop, handler })
     }
 
@@ -113,6 +83,53 @@ impl PulseBackend {
             });
         });
     }
+}
+
+/// Install the state callback on `slot`'s context and begin connecting. On `Ready` → subscribe +
+/// prime; on `Failed`/`Terminated` → emit `Unavailable` and, after [`RECONNECT_DELAY`], build a
+/// *fresh* context (libpulse contexts aren't reusable once terminated) and reconnect — so volume
+/// self-heals across a PipeWire restart. The retry is self-sustaining (each failed attempt's context
+/// re-enters this on its own `Failed`). Weak refs to the slot + mainloop avoid a reference cycle with
+/// the context that owns the callback, and stop reconnecting once the backend is dropped.
+fn configure_and_connect(
+    mainloop: &Rc<Mainloop>,
+    slot: &Rc<RefCell<Context>>,
+    handler: &Handler,
+) -> Option<()> {
+    let (ml_weak, slot_weak, handler_cb) =
+        (Rc::downgrade(mainloop), Rc::downgrade(slot), handler.clone());
+    slot.borrow_mut().set_state_callback(Some(Box::new(move || {
+        // libpulse calls this synchronously inside Context methods while we hold `borrow_mut`; defer
+        // the real work to a GLib idle tick so the borrow is released and we're on a clean stack.
+        let (ml_weak, slot_weak, handler) = (ml_weak.clone(), slot_weak.clone(), handler_cb.clone());
+        glib::idle_add_local_once(move || {
+            let Some(slot) = slot_weak.upgrade() else { return };
+            let state = slot.borrow().get_state(); // drop the borrow before the arms re-borrow
+            match state {
+                State::Ready => subscribe_and_prime(&slot, &handler),
+                State::Failed | State::Terminated => {
+                    emit(&handler, VolumeEvent::Unavailable);
+                    let (ml_weak, slot_weak, handler) =
+                        (ml_weak.clone(), slot_weak.clone(), handler.clone());
+                    glib::timeout_add_local_once(RECONNECT_DELAY, move || {
+                        let (Some(ml), Some(slot)) = (ml_weak.upgrade(), slot_weak.upgrade()) else {
+                            return; // backend dropped — stop reconnecting
+                        };
+                        if let Some(ctx) = Context::new(&*ml, "wafflebar") {
+                            *slot.borrow_mut() = ctx; // drop the dead context, install a fresh one
+                            let _ = configure_and_connect(&ml, &slot, &handler);
+                        }
+                    });
+                }
+                _ => {}
+            }
+        });
+    })));
+    if slot.borrow_mut().connect(None, FlagSet::NOFLAGS, None).is_err() {
+        warn!("volume: libpulse Context::connect failed; no audio backend");
+        return None;
+    }
+    Some(())
 }
 
 /// Subscribe to sink/server changes and prime the current value once.
