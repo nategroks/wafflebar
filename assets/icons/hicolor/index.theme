@@ -1,0 +1,10 @@
+[Icon Theme]
+Name=hicolor
+Comment=wafflebar bundled glyphs (Lucide, ISC) — recolorable symbolic icons
+Directories=scalable/status
+[scalable/status]
+Context=Status
+MinSize=8
+Size=16
+MaxSize=512
+Type=Scalable

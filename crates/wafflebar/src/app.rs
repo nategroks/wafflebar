@@ -40,6 +40,7 @@ pub fn build_bars(
         return;
     };
     crate::theme::install(&display, config_path);
+    register_bundled_icons(&display);
 
     // Notifications (G) — session-wide, started once per process (not per monitor). The server owns
     // org.freedesktop.Notifications; the stack renders incoming notifications as top-right popups.
@@ -226,6 +227,20 @@ fn present_bar(
         };
         crate::config_reload::watch_config(path.to_path_buf(), host.clone(), rebuild, config.clone());
     }
+}
+
+/// Register wafflebar's bundled icon search paths so the `wb-*` glyphs (Lucide, recolored as
+/// symbolic) resolve regardless of the user's system icon theme. Unique `wb-*` names mean no
+/// priority fight — real app icons still come from the system theme. Covers the dev checkout and
+/// standard install dirs; `add_search_path` is harmless for dirs that don't exist.
+fn register_bundled_icons(display: &gdk::Display) {
+    let theme = gtk4::IconTheme::for_display(display);
+    theme.add_search_path(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/icons"));
+    if let Some(home) = std::env::var_os("HOME") {
+        theme.add_search_path(std::path::Path::new(&home).join(".local/share/wafflebar/icons"));
+    }
+    theme.add_search_path("/usr/share/wafflebar/icons");
+    theme.add_search_path("/usr/local/share/wafflebar/icons");
 }
 
 /// Apply the `[bar]` layer-shell layout (edge anchors + exclusive zone + height). gtk4-layer-shell

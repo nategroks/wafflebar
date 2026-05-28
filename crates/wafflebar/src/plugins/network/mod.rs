@@ -61,22 +61,22 @@ impl Default for Network {
 /// Wireless signal icon by strength bucket (freedesktop `network-wireless-signal-*`).
 fn wifi_icon(strength: u8) -> &'static str {
     match strength {
-        0..=15 => "network-wireless-signal-none",
-        16..=40 => "network-wireless-signal-weak",
-        41..=65 => "network-wireless-signal-ok",
-        66..=85 => "network-wireless-signal-good",
-        _ => "network-wireless-signal-excellent",
+        0..=15 => "wb-net-wifi-none-symbolic",
+        16..=40 => "wb-net-wifi-weak-symbolic",
+        41..=65 => "wb-net-wifi-ok-symbolic",
+        66..=85 => "wb-net-wifi-good-symbolic",
+        _ => "wb-net-wifi-excellent-symbolic",
     }
 }
 
 fn derive(state: &NetworkState) -> Display {
     match state {
         NetworkState::Disconnected => Display {
-            icon: "network-offline",
+            icon: "wb-net-offline-symbolic",
             label: "offline".to_string(),
         },
         NetworkState::Wired { name } => Display {
-            icon: "network-wired",
+            icon: "wb-net-wired-symbolic",
             label: name.clone(),
         },
         NetworkState::Wireless { name, strength } => Display {
@@ -184,7 +184,7 @@ mod tests {
         match n.view() {
             View::Button { child, .. } => {
                 let View::Row { children, .. } = *child else { panic!("row") };
-                assert!(matches!(&children[0], View::Icon { name, .. } if name == "network-offline"));
+                assert!(matches!(&children[0], View::Icon { name, .. } if name == "wb-net-offline-symbolic"));
             }
             _ => panic!("expected button"),
         }

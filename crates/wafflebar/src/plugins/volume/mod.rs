@@ -50,13 +50,13 @@ fn to_percent(volume: u32) -> u8 {
 /// Icon name by level/mute — xfce4-pulseaudio-plugin's convention.
 fn icon_for(s: SinkState) -> &'static str {
     if s.muted || s.percent == 0 {
-        "audio-volume-muted"
+        "wb-vol-muted-symbolic"
     } else if s.percent < 34 {
-        "audio-volume-low"
+        "wb-vol-low-symbolic"
     } else if s.percent < 67 {
-        "audio-volume-medium"
+        "wb-vol-medium-symbolic"
     } else {
-        "audio-volume-high"
+        "wb-vol-high-symbolic"
     }
 }
 
@@ -176,7 +176,7 @@ mod tests {
             View::Button { child, .. } => {
                 // 25% → low icon
                 let View::Row { children, .. } = *child else { panic!("row") };
-                assert!(matches!(&children[0], View::Icon { name, .. } if name == "audio-volume-low"));
+                assert!(matches!(&children[0], View::Icon { name, .. } if name == "wb-vol-low-symbolic"));
             }
             _ => panic!("expected button"),
         }

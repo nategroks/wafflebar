@@ -39,7 +39,7 @@ impl Plugin for ShowDesktop {
         if !self.supported {
             return View::Empty; // WM has no show-desktop (e.g. dwl) — show nothing, not a dead button
         }
-        View::icon("user-desktop", 18)
+        View::icon("wb-showdesktop-symbolic", 18)
             .button(ActionId::new(ACTION_TOGGLE))
             .with_class("wb-showdesktop")
             .with_class(if self.active { "active" } else { "inactive" })

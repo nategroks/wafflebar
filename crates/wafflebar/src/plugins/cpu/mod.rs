@@ -77,7 +77,7 @@ impl Plugin for Cpu {
         };
         View::row(
             vec![
-                View::icon("utilities-system-monitor", 16).with_class("cpu-icon"),
+                View::icon("wb-cpu-symbolic", 16).with_class("cpu-icon"),
                 View::label(format!("{}%", d.pct)).with_class("cpu-label"),
             ],
             4,
