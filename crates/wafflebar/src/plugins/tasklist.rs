@@ -90,7 +90,7 @@ impl Plugin for Tasklist {
                     .with_key(format!("win:{}", w.id))
                     .with_class("task");
                 if w.focused {
-                    btn = btn.with_class("active");
+                    btn = btn.with_class("focused"); // matches `.task.focused` in the themes + STYLING.md
                 }
                 if w.minimized {
                     btn = btn.with_class("minimized");
@@ -161,7 +161,7 @@ mod tests {
         }
     }
 
-    /// Collect (action, has-active-class) per task button.
+    /// Collect (action, has-focused-class) per task button.
     fn tasks(v: &View) -> Vec<(ActionId, bool)> {
         let View::Row { children, .. } = v else {
             return Vec::new();
@@ -170,7 +170,7 @@ mod tests {
             .iter()
             .filter_map(|c| match c {
                 View::Button { action, classes, .. } => {
-                    Some((action.clone(), classes.iter().any(|c| c == "active")))
+                    Some((action.clone(), classes.iter().any(|c| c == "focused")))
                 }
                 _ => None,
             })

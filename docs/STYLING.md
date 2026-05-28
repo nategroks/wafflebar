@@ -78,12 +78,12 @@ Used across the system plugins on bucketed values, so a theme styles them once:
 | `.occupied` | has content (tags) |
 | `.urgent` | demands attention (tags) |
 
-## Deliberately unstyled: the Settings window
+## Settings window
 
-The preferences window (`prefs.rs`) is **not** themed by wafflebar — it inherits the user's GTK theme,
-so it looks like a native settings dialog rather than the panel. Its widgets emit standard GTK classes
-(`window`, `entry`, `switch`, …); a user who wants to theme it can target those in their `theme.css`.
-This is a deliberate non-style decision.
+The preferences window (`prefs.rs`) is themed to match the panel — its root carries `.settings`, so
+themes style `.settings` (background/text), `.settings row:selected`, `.settings entry`/`spinbutton`,
+and `.settings button` (incl. `.destructive-action`). (Earlier it was deliberately native-GTK; now it
+matches the apps menu for a consistent look.)
 
 ## Verifying a theme actually applies
 
