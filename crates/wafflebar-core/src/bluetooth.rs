@@ -15,17 +15,21 @@ pub struct BluetoothState {
     pub present: bool,
     /// Whether the adapter is powered on.
     pub powered: bool,
-    /// Paired devices (the ones worth listing), each with its live connection state.
+    /// Whether the adapter is actively scanning for nearby devices.
+    pub discovering: bool,
+    /// Devices worth listing: all *paired* devices, plus *discovered* (unpaired) ones while scanning.
     pub devices: Vec<BtDevice>,
 }
 
-/// One paired Bluetooth device.
+/// A Bluetooth device — either a paired one (connect/disconnect) or a discovered one (pair).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BtDevice {
     /// BlueZ object path (`/org/bluez/hci0/dev_XX_…`) — the stable id used to address commands.
     pub path: String,
     /// Display name (BlueZ `Alias`, falling back to `Name`/address).
     pub name: String,
+    /// Whether it is paired (already known). Unpaired entries appear only while scanning.
+    pub paired: bool,
     /// Whether it is currently connected.
     pub connected: bool,
 }
@@ -39,6 +43,10 @@ pub enum BluetoothCommand {
     Connect(String),
     /// Disconnect the device at this object path (`Device1.Disconnect`).
     Disconnect(String),
+    /// Start/stop scanning for nearby devices (`Adapter1.StartDiscovery`/`StopDiscovery`).
+    SetDiscovering(bool),
+    /// Pair (then connect) the discovered device at this object path (`Device1.Pair`).
+    Pair(String),
 }
 
 impl BluetoothState {
