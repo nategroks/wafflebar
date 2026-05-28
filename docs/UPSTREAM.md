@@ -391,6 +391,18 @@ the name). `SetMinimized` is a no-op (sway/i3 have no minimize). **i3 is effecti
 for the primary target); i3 ships "sway-tested, i3-likely-works", a compat shim if quirks emerge. When
 a real i3-divergence or a third i3-ipc consumer appears, extract the codec to `core::i3_ipc`.
 
+## Theming: the emitted classes are a documented contract
+The renderer emits ~53 semantic CSS classes; `docs/STYLING.md` inventories them (per-plugin + shared
+state classes) as the **styling contract**. A theme styles these; a new plugin emits classes by the
+convention and updates `STYLING.md` in the same PR (the way code updates UPSTREAM.md). The reference
+theme `themes/nord.css` styles every class — and a periodic audit matters: Nord had drifted (it
+predated the E applications-menu and G notifications, so those classes rendered with GTK defaults; a
+stale `.pulseaudio` lingered from the volume rename). The audit-as-milestone-reframe was the finding:
+"theming infra exists; half the app wasn't styled deliberately." **The Settings window is
+deliberately *unstyled*** — it inherits the user's GTK theme so it reads as a native settings dialog,
+not the panel; its widgets emit standard GTK classes a user can still target. (Theme *model* —
+named-built-in + user override layer, hot-reload — lands with PR2.)
+
 ## Roadmap (phases, each tied to a real directory)
 - **A** finish M2 — `tasklist` (this PR).
 - **B** plugin framework — `Plugin::configure` (per-instance TOML + `notify` live-reload), `launcher`, `separator`/`showdesktop`.
