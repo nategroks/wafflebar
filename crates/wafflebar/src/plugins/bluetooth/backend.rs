@@ -26,6 +26,7 @@ use zbus::{Connection, Proxy};
 const BLUEZ: &str = "org.bluez";
 const ADAPTER_IFACE: &str = "org.bluez.Adapter1";
 const DEVICE_IFACE: &str = "org.bluez.Device1";
+const BATTERY_IFACE: &str = "org.bluez.Battery1";
 const AGENT_PATH: &str = "/dev/wafflebar/btagent";
 const POLL: Duration = Duration::from_secs(2);
 
@@ -154,11 +155,15 @@ fn derive(objs: &Managed) -> (BluetoothState, Option<String>) {
             let name = get_str(props, "Alias")
                 .or_else(|| get_str(props, "Name"))
                 .unwrap_or_else(|| path.to_string());
+            // Battery1 is a sibling interface on the same object, present only for battery-reporting
+            // connected devices.
+            let battery = ifaces.get(BATTERY_IFACE).and_then(|b| get_u8(b, "Percentage"));
             devices.push(BtDevice {
                 path: path.to_string(),
                 name,
                 paired: get_bool(props, "Paired").unwrap_or(false),
                 connected: get_bool(props, "Connected").unwrap_or(false),
+                battery,
             });
         }
     }
@@ -214,4 +219,7 @@ fn get_bool(props: &HashMap<String, OwnedValue>, key: &str) -> Option<bool> {
 }
 fn get_str(props: &HashMap<String, OwnedValue>, key: &str) -> Option<String> {
     props.get(key).and_then(|v| String::try_from(v.clone()).ok())
+}
+fn get_u8(props: &HashMap<String, OwnedValue>, key: &str) -> Option<u8> {
+    props.get(key).and_then(|v| u8::try_from(v.clone()).ok())
 }
