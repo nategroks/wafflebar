@@ -56,6 +56,9 @@ pub struct Host {
     /// Latest default-sink `(percent, muted)` mirrored from `VolumeEvent`s, so the volume mixer
     /// popover can seed its slider with the current level when opened. `None` until the first event.
     volume_state: std::cell::Cell<Option<(u8, bool)>>,
+    /// Mirrored sink list from `VolumeEvent::Sinks`, so the mixer's output picker can render every
+    /// available sink (and highlight the current default) when the popover opens.
+    volume_sinks: std::cell::RefCell<Vec<wafflebar_core::SinkInfo>>,
 }
 
 impl Host {
@@ -82,6 +85,7 @@ impl Host {
             icon_size: std::cell::Cell::new(icon_size),
             menu: Rc::new(RefCell::new(crate::menu::MenuState::default())),
             volume_state: std::cell::Cell::new(None),
+            volume_sinks: std::cell::RefCell::new(Vec::new()),
         })
     }
 
@@ -174,6 +178,17 @@ impl Host {
         body.append(&Label::new(Some("Volume")));
         body.append(&row);
 
+        // Output picker (P4): a row per sink, current default marked + non-default rows clickable to
+        // switch. The seed closure repopulates this `output_box` on each open from the host-mirrored
+        // sink list, so plugging a Bluetooth headset (a new sink) shows up next time the menu opens.
+        let output_label = Label::new(Some("Output"));
+        output_label.set_xalign(0.0);
+        output_label.set_margin_top(4);
+        body.append(&output_label);
+        let output_box = gtk4::Box::new(Orientation::Vertical, 2);
+        output_box.add_css_class("mixer-outputs");
+        body.append(&output_box);
+
         // Equalizer: a DSP EQ isn't part of the volume API — the standard PipeWire equalizer is the
         // EasyEffects app (or older PulseEffects), which inserts itself into the audio graph. The
         // mixer just launches it — and only shows the button when such an app is actually installed,
@@ -186,13 +201,40 @@ impl Host {
         }
 
         let seed = {
-            let (host, scale, mute, updating) = (self.clone(), scale.clone(), mute.clone(), updating.clone());
+            let (host, scale, mute, updating, output_box) =
+                (self.clone(), scale.clone(), mute.clone(), updating.clone(), output_box.clone());
             move || {
                 let (percent, muted) = host.volume_state.get().unwrap_or((0, false));
                 updating.set(true);
                 scale.set_value(percent as f64);
                 updating.set(false);
                 mute.set_label(if muted { "Unmute" } else { "Mute" });
+                // Rebuild output rows from the mirrored sink list.
+                while let Some(child) = output_box.first_child() {
+                    output_box.remove(&child);
+                }
+                let sinks = host.volume_sinks.borrow().clone();
+                if sinks.is_empty() {
+                    let dim = Label::new(Some("No audio outputs"));
+                    dim.add_css_class("dim-label");
+                    dim.set_xalign(0.0);
+                    output_box.append(&dim);
+                } else {
+                    for sink in sinks {
+                        let mark = if sink.is_default { "● " } else { "○ " };
+                        let label = format!("{mark}{}", sink.description);
+                        let btn = Button::with_label(&label);
+                        btn.add_css_class("mixer-output");
+                        if sink.is_default {
+                            btn.add_css_class("default");
+                            btn.set_sensitive(false); // already selected; nothing to do
+                        } else {
+                            let (host, name) = (host.clone(), sink.name.clone());
+                            btn.connect_clicked(move |_| host.set_default_sink(&name));
+                        }
+                        output_box.append(&btn);
+                    }
+                }
             }
         };
         seed(); // initial state at build time
@@ -207,6 +249,11 @@ impl Host {
     /// Toggle mute on the default sink (the mixer's mute button).
     pub fn toggle_mute(&self) {
         (self.volume_sink)(&VolumeCommand::ToggleMute);
+    }
+
+    /// Switch the default audio sink (the mixer's output picker).
+    pub fn set_default_sink(&self, name: &str) {
+        (self.volume_sink)(&VolumeCommand::SetDefaultSink(name.to_string()));
     }
 
     /// The effective icon pixel size for bar glyphs (see the `icon_size` field).
@@ -256,6 +303,10 @@ impl Host {
                 / (wafflebar_core::VOLUME_NORM as u64))
                 .min(100) as u8;
             self.volume_state.set(Some((percent, *muted)));
+        }
+        // Mirror the sink list for the mixer's output picker.
+        if let Event::Volume(wafflebar_core::VolumeEvent::Sinks(sinks)) = ev {
+            *self.volume_sinks.borrow_mut() = sinks.clone();
         }
         let n = self.slots.borrow().len();
         for i in 0..n {
