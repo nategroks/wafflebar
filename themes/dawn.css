@@ -1,0 +1,275 @@
+/* wafflebar — built-in Dawn theme (light). GTK4 CSS.
+ *
+ * The light counterpart to Nord; styles every class in docs/STYLING.md, honoring the same structure
+ * (e.g. notification urgency = a 3px left accent — placement constant across themes, only the color
+ * varies). Select with `bar.theme = "dawn"`.
+ *
+ * Solarized-light palette: base3 #fdf6e3 · base2 #eee8d5 · base1 #93a1a1 · base00 #657b83 ·
+ * base01 #586e75 · blue #268bd2 · cyan #2aa198 · green #859900 · yellow #b58900 · orange #cb4b16 ·
+ * red #dc322f · violet #6c71c4. */
+
+window#wafflebar {
+    background-color: #fdf6e3;
+    color: #657b83;
+    font-family: "Hurmit Nerd Font Mono", "Fira Code", monospace;
+    font-size: 13px;
+}
+
+#grid {
+    margin: 0 4px;
+    /* Visible surface is #grid, not window#wafflebar — see nord.css / docs/STYLING.md. */
+    background-color: #fdf6e3;
+    color: #657b83;
+}
+
+.module {
+    padding: 0 8px;
+}
+
+.wb-button {
+    border-radius: 4px;
+}
+.wb-button:hover {
+    background-color: #eee8d5;
+}
+
+.dim-label {
+    color: #93a1a1;
+}
+
+.placeholder {
+    color: #93a1a1;
+    font-style: italic;
+}
+
+.clock {
+    color: #268bd2;
+    font-weight: bold;
+}
+
+/* tags */
+.tags {
+    padding: 0 2px;
+}
+.tag {
+    padding: 0 5px;
+    color: #93a1a1; /* empty / unselected */
+}
+.tag.occupied {
+    color: #657b83;
+}
+.tag.active {
+    color: #268bd2;
+    font-weight: bold;
+}
+.tag.urgent {
+    color: #dc322f;
+    font-weight: bold;
+}
+
+.window {
+    color: #657b83;
+}
+
+/* tasklist */
+.tasklist {
+    padding: 0 2px;
+}
+.task {
+    padding: 0 6px;
+    border-radius: 4px;
+    color: #657b83;
+}
+.task:hover {
+    background-color: #eee8d5;
+}
+.task.focused {
+    background-color: #eee8d5;
+    color: #268bd2;
+}
+.task.minimized {
+    color: #93a1a1;
+}
+.task-icon {
+    margin-right: 4px;
+}
+
+/* launcher */
+.launcher {
+    padding: 0 4px;
+}
+.wb-launcher-button {
+    padding: 0 4px;
+    border-radius: 4px;
+}
+.wb-launcher-button:hover {
+    background-color: #eee8d5;
+}
+.wb-launcher-icon {
+    margin: 0 1px;
+}
+.wb-launcher-label {
+    color: #657b83;
+}
+.wb-menu {
+    padding: 4px;
+}
+.wb-menu-item {
+    padding: 4px 10px;
+    color: #657b83;
+}
+.wb-menu-item:hover {
+    background-color: #eee8d5;
+}
+
+/* statustray */
+.statustray {
+    padding: 0 4px;
+}
+.tray-item {
+    padding: 0 3px;
+    border-radius: 4px;
+}
+.tray-item:hover {
+    background-color: #eee8d5;
+}
+.tray-item.needs-attention {
+    background-color: #dc322f;
+}
+
+/* cpu / memory / network / volume */
+.cpu {
+    padding: 0 6px;
+}
+.cpu .cpu-icon {
+    color: #6c71c4;
+}
+.cpu.high .cpu-label {
+    color: #b58900;
+}
+.cpu.critical .cpu-label {
+    color: #dc322f;
+    font-weight: bold;
+}
+
+.memory {
+    padding: 0 6px;
+}
+.memory .mem-icon {
+    color: #859900;
+}
+.memory.high .mem-label {
+    color: #b58900;
+}
+.memory.critical .mem-label {
+    color: #dc322f;
+    font-weight: bold;
+}
+.memory.swapping .mem-icon {
+    color: #cb4b16;
+}
+
+.network {
+    padding: 0 6px;
+}
+.network .net-icon {
+    color: #268bd2;
+}
+.network .net-label {
+    color: #657b83;
+}
+
+.volume {
+    padding: 0 6px;
+}
+.volume .vol-icon {
+    color: #2aa198;
+}
+.volume .vol-label {
+    color: #657b83;
+}
+.volume.muted .vol-icon,
+.volume.muted .vol-label {
+    color: #93a1a1;
+}
+
+/* show-desktop */
+.wb-showdesktop {
+    padding: 0 4px;
+    border-radius: 4px;
+}
+.wb-showdesktop:hover {
+    background-color: #eee8d5;
+}
+.wb-showdesktop.active {
+    background-color: #eee8d5;
+    color: #268bd2;
+}
+
+/* applications menu */
+.appmenu {
+    padding: 0 6px;
+}
+.appmenu-popover {
+    background-color: #fdf6e3;
+    color: #657b83;
+    border-radius: 6px;
+}
+.appmenu-popover row:selected {
+    background-color: #eee8d5;
+}
+.appmenu-popover entry {
+    margin-bottom: 4px;
+}
+
+/* notifications — same 3px left accent shape as Nord; only the colors differ. */
+.notifications {
+    padding: 4px;
+}
+.notification {
+    background-color: #eee8d5;
+    color: #657b83;
+    border-radius: 6px;
+    padding: 10px 12px;
+    border-left: 3px solid #268bd2; /* normal */
+}
+.notification.notification-low {
+    border-left-color: #93a1a1;
+}
+.notification.notification-critical {
+    border-left-color: #dc322f;
+}
+.notification-summary {
+    font-weight: bold;
+}
+.notification-body {
+    color: #657b83;
+}
+.notification-close {
+    padding: 0 4px;
+    min-height: 0;
+    min-width: 0;
+}
+
+/* separator */
+.wb-separator {
+    margin: 4px 2px;
+}
+.wb-separator.transparent { }
+.wb-separator.line {
+    color: #93a1a1;
+}
+.wb-separator.handle {
+    min-width: 6px;
+    background-image: radial-gradient(circle, #93a1a1 1px, transparent 1px);
+    background-size: 6px 6px;
+    background-repeat: repeat-y;
+    background-position: center;
+}
+.wb-separator.dots {
+    min-width: 4px;
+    background-image: radial-gradient(circle, #93a1a1 1.5px, transparent 1.5px);
+    background-size: 4px 8px;
+    background-repeat: repeat-y;
+    background-position: center;
+}
