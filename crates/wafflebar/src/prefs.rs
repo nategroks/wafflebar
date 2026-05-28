@@ -121,8 +121,14 @@ pub fn open(config_path: &Path) {
         move |_| open_add_items(&ctx)
     });
 
+    // Reserve the list's width on the ScrolledWindow itself (a scroll wrapper doesn't propagate its
+    // child's width request) + drop horizontal scroll, so the hexpanding form pane can't overlap it.
+    let list_scroll = ScrolledWindow::builder().child(&list).vexpand(true).build();
+    list_scroll.set_width_request(190);
+    list_scroll.set_hexpand(false);
+    list_scroll.set_hscrollbar_policy(gtk4::PolicyType::Never);
     let left = gtk4::Box::new(Orientation::Vertical, 0);
-    left.append(&ScrolledWindow::builder().child(&list).vexpand(true).build());
+    left.append(&list_scroll);
     left.append(&add_btn);
 
     let split = gtk4::Box::new(Orientation::Horizontal, 0);
