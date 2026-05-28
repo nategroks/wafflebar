@@ -16,7 +16,10 @@ wafflebar-core = { path = "../wafflebar-core" }
 anyhow.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
-gtk4 = { version = "0.11.3", features = ["v4_12"] }
+# Build the bindings for the runtime GTK (4.18). Building for an older API level (v4_12) silently
+# excludes gtk4-layer-shell surfaces from the display's CSS-provider cascade, so no app-attached
+# CssProvider reaches the bar — our bundled themes never applied. See UPSTREAM.md.
+gtk4 = { version = "0.11.3", features = ["v4_18"] }
 gtk4-layer-shell = "0.8.0"
 chrono = "0.4.44"
 clap = { version = "4.6.1", features = ["derive"] }

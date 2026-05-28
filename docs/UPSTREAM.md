@@ -403,6 +403,34 @@ deliberately *unstyled*** — it inherits the user's GTK theme so it reads as a 
 not the panel; its widgets emit standard GTK classes a user can still target. (Theme *model* —
 named-built-in + user override layer, hot-reload — lands with PR2.)
 
+### The gtk4 feature flag must match the runtime, or no theme applies at all
+Until the `gtk4` crate's feature was set to `v4_18` (matching the runtime GTK 4.18), **display-attached
+`CssProvider`s did not reach gtk4-layer-shell surfaces** — `style_context_add_provider_for_display`
+silently excluded the bar's widget tree from our providers (GTK's *own* internal theme still applied,
+which is what hid it). Building the bindings for an older API level (`v4_12`) against a newer runtime
+is the trap: it compiles and runs, the bar shows, text is themed — but every app-bundled CSS rule is
+a no-op on the layer surface. Consequence: **wafflebar's themes were never actually in effect through
+PR1.** The bar *looked* themed only because the dev host runs a system-wide Nordic GTK theme that bled
+through the transparent layer surface. PR1 (the Nord audit + `STYLING.md` inventory) wrote correct CSS
+that wasn't visibly applied; the `v4_18` flag is the mechanism by which any bundled theme reaches the
+bar. Verified by pixel-sampling an isolation example: a plain `ApplicationWindow` got the provider's
+cyan under both flags, but a `init_layer_shell()` window got it **only** under `v4_18` (3276 px of
+`#00ffff` vs a transparent surface under `v4_12`). The full binary compiles clean under `v4_18` with
+no API churn — it is a one-line `Cargo.toml` change. *Lesson:* keep the `gtk4` feature pinned to the
+GTK the binary is built and shipped against; a skew is invisible until something (here, theming) only
+the newer code path wires up is exercised.
+
+Second consequence, surfaced in the same re-verification: the bar's **visible background is the
+`#grid` node, not `window#wafflebar`**. A non-transparent system theme (Nordic) paints the grid and
+covers the window node, so a theme that sets `background-color` only on `window#wafflebar` shows the
+system color, not its own. Themes must paint the container the modules actually sit on (`#grid`). This
+is a CSS-authoring fix to the bundled themes, tracked separately from the flag fix.
+
+*Verification protocol (learned here):* visual theme verification must run where the system GTK theme
+is **distinct** from the wafflebar theme under test — otherwise system bleed-through masks
+theme-application bugs. Prefer a garish probe theme (a color no system theme would produce) over a
+same-family theme; pixel-sample, don't eyeball.
+
 ## Roadmap (phases, each tied to a real directory)
 - **A** finish M2 — `tasklist` (this PR).
 - **B** plugin framework — `Plugin::configure` (per-instance TOML + `notify` live-reload), `launcher`, `separator`/`showdesktop`.
