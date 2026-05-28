@@ -1,5 +1,11 @@
-/* wafflebar — built-in Nord theme (mirrors the prior waybar look).
- * GTK4 CSS. Override by pointing `bar.theme` at your own file. */
+/* wafflebar — built-in Nord theme. GTK4 CSS.
+ *
+ * This is the reference theme: it styles *every* class the renderer emits (see docs/STYLING.md for
+ * the inventory). Select it with `bar.theme = "nord"`; layer your own tweaks via
+ * `$XDG_CONFIG_HOME/wafflebar/theme.css`, or replace it entirely with `bar.theme = "/path.css"`.
+ *
+ * Nord palette: polar night #2e3440 #3b4252 #434c5e #4c566a · snow #d8dee9 #e5e9f0 #eceff4 ·
+ * frost #8fbcbb #88c0d0 #81a1c1 #5e81ac · aurora #bf616a #d08770 #ebcb8b #a3be8c #b48ead. */
 
 window#wafflebar {
     background-color: #2e3440;
@@ -16,9 +22,17 @@ window#wafflebar {
     padding: 0 8px;
 }
 
-.clock {
-    color: #88c0d0;
-    font-weight: bold;
+/* Generic clickable wrapper the renderer puts on every Button. */
+.wb-button {
+    border-radius: 4px;
+}
+.wb-button:hover {
+    background-color: #3b4252;
+}
+
+/* Dim secondary text (subtitles, "no results", informational notes). */
+.dim-label {
+    color: #4c566a;
 }
 
 .placeholder {
@@ -26,71 +40,226 @@ window#wafflebar {
     font-style: italic;
 }
 
-/* per-module accent colors (used as modules land in M2/M3) */
-.cpu        { color: #a3be8c; }
-.memory     { color: #ebcb8b; }
-.network    { color: #81a1c1; }
-.pulseaudio { color: #b48ead; }
-.pulseaudio.muted { color: #bf616a; }
-.tags .occupied { color: #88c0d0; }
-.tags .urgent   { color: #bf616a; }
+.clock {
+    color: #88c0d0;
+    font-weight: bold;
+}
 
-/* launcher: icon buttons + right-click action menu */
-.launcher { padding: 0 4px; }
+/* tags: one .tag per workspace inside the .tags row; state classes mark active/occupied/urgent. */
+.tags {
+    padding: 0 2px;
+}
+.tag {
+    padding: 0 5px;
+    color: #4c566a; /* empty / unselected */
+}
+.tag.occupied {
+    color: #d8dee9;
+}
+.tag.active {
+    color: #88c0d0;
+    font-weight: bold;
+}
+.tag.urgent {
+    color: #bf616a;
+    font-weight: bold;
+}
+
+/* window: focused window title. */
+.window {
+    color: #d8dee9;
+}
+
+/* tasklist: one .task button per window; .focused is the active window, .minimized is dimmed. */
+.tasklist {
+    padding: 0 2px;
+}
+.task {
+    padding: 0 6px;
+    border-radius: 4px;
+    color: #d8dee9;
+}
+.task:hover {
+    background-color: #3b4252;
+}
+.task.focused {
+    background-color: #434c5e;
+    color: #88c0d0;
+}
+.task.minimized {
+    color: #4c566a;
+}
+.task-icon {
+    margin-right: 4px;
+}
+
+/* launcher: icon buttons + right-click action menu. */
+.launcher {
+    padding: 0 4px;
+}
 .wb-launcher-button {
     padding: 0 4px;
     border-radius: 4px;
 }
-.wb-launcher-button:hover { background-color: #3b4252; }
-.wb-launcher-label { color: #d8dee9; }
-.wb-menu { padding: 4px; }
+.wb-launcher-button:hover {
+    background-color: #3b4252;
+}
+.wb-launcher-icon {
+    margin: 0 1px;
+}
+.wb-launcher-label {
+    color: #d8dee9;
+}
+.wb-menu {
+    padding: 4px;
+}
 .wb-menu-item {
     padding: 4px 10px;
     color: #d8dee9;
 }
-.wb-menu-item:hover { background-color: #434c5e; }
+.wb-menu-item:hover {
+    background-color: #434c5e;
+}
 
-/* statustray: SNI item icons */
-.statustray { padding: 0 4px; }
-.tray-item { padding: 0 3px; border-radius: 4px; }
-.tray-item:hover { background-color: #3b4252; }
-.tray-item.needs-attention { background-color: #bf616a; } /* SNI NeedsAttention */
+/* statustray: SNI item icons. */
+.statustray {
+    padding: 0 4px;
+}
+.tray-item {
+    padding: 0 3px;
+    border-radius: 4px;
+}
+.tray-item:hover {
+    background-color: #3b4252;
+}
+.tray-item.needs-attention {
+    background-color: #bf616a;
+} /* SNI NeedsAttention */
 
-/* cpu: aggregate load percent; bucket classes tint as it climbs */
-.cpu { padding: 0 6px; }
-.cpu .cpu-icon { color: #b48ead; }
-.cpu.high .cpu-label     { color: #ebcb8b; }
-.cpu.critical .cpu-label { color: #bf616a; font-weight: bold; }
+/* cpu / memory / network / volume: icon + value; bucket classes tint as load climbs. */
+.cpu {
+    padding: 0 6px;
+}
+.cpu .cpu-icon {
+    color: #b48ead;
+}
+.cpu.high .cpu-label {
+    color: #ebcb8b;
+}
+.cpu.critical .cpu-label {
+    color: #bf616a;
+    font-weight: bold;
+}
 
-/* memory: RAM usage percent; pressure classes tint as it climbs */
-.memory { padding: 0 6px; }
-.memory .mem-icon { color: #a3be8c; }
-.memory.high .mem-label    { color: #ebcb8b; }
-.memory.critical .mem-label { color: #bf616a; font-weight: bold; }
-.memory.swapping .mem-icon { color: #d08770; }
+.memory {
+    padding: 0 6px;
+}
+.memory .mem-icon {
+    color: #a3be8c;
+}
+.memory.high .mem-label {
+    color: #ebcb8b;
+}
+.memory.critical .mem-label {
+    color: #bf616a;
+    font-weight: bold;
+}
+.memory.swapping .mem-icon {
+    color: #d08770;
+}
 
-/* network: connection icon + name; click opens the editor */
-.network { padding: 0 6px; }
-.network .net-icon { color: #81a1c1; }
-.network .net-label { color: #d8dee9; }
+.network {
+    padding: 0 6px;
+}
+.network .net-icon {
+    color: #81a1c1;
+}
+.network .net-label {
+    color: #d8dee9;
+}
 
-/* volume: icon + percent; scroll to change, click to mute */
-.volume { padding: 0 6px; }
-.volume .vol-icon { color: #88c0d0; }
-.volume .vol-label { color: #d8dee9; }
+.volume {
+    padding: 0 6px;
+}
+.volume .vol-icon {
+    color: #88c0d0;
+}
+.volume .vol-label {
+    color: #d8dee9;
+}
+.volume.muted .vol-icon,
+.volume.muted .vol-label {
+    color: #4c566a;
+}
 
-/* show-desktop: a single toggle button; .active reflects the engaged state */
-.wb-showdesktop { padding: 0 4px; border-radius: 4px; }
-.wb-showdesktop:hover { background-color: #3b4252; }
-.wb-showdesktop.active { background-color: #434c5e; color: #88c0d0; }
+/* show-desktop: a single toggle; .active reflects the engaged state. */
+.wb-showdesktop {
+    padding: 0 4px;
+    border-radius: 4px;
+}
+.wb-showdesktop:hover {
+    background-color: #3b4252;
+}
+.wb-showdesktop.active {
+    background-color: #434c5e;
+    color: #88c0d0;
+}
+
+/* applications menu: the bar button + the host-rendered two-pane popover. */
+.appmenu {
+    padding: 0 6px;
+}
+.appmenu-popover {
+    background-color: #2e3440;
+    color: #d8dee9;
+    border-radius: 6px;
+}
+.appmenu-popover row:selected {
+    background-color: #434c5e;
+}
+.appmenu-popover entry {
+    margin-bottom: 4px;
+}
+
+/* notifications: top-right popups; a left accent encodes urgency (same shape across themes). */
+.notifications {
+    padding: 4px;
+}
+.notification {
+    background-color: #3b4252;
+    color: #d8dee9;
+    border-radius: 6px;
+    padding: 10px 12px;
+    border-left: 3px solid #81a1c1; /* normal */
+}
+.notification.notification-low {
+    border-left-color: #4c566a;
+}
+.notification.notification-critical {
+    border-left-color: #bf616a;
+}
+.notification-summary {
+    font-weight: bold;
+}
+.notification-body {
+    color: #d8dee9;
+}
+.notification-close {
+    padding: 0 4px;
+    min-height: 0;
+    min-width: 0;
+}
 
 /* separator: blank space, a rule, a handle grip, or dots. Thickness/size are CSS, not config. */
-.wb-separator { margin: 4px 2px; }
+.wb-separator {
+    margin: 4px 2px;
+}
 .wb-separator.transparent { /* nothing — pure (optionally expanding) space */ }
-.wb-separator.line { color: #4c566a; }            /* gtk::Separator draws from `color` */
+.wb-separator.line {
+    color: #4c566a;
+} /* gtk::Separator draws from `color` */
 .wb-separator.handle {
     min-width: 6px;
-    /* a vertical dotted grip */
     background-image: radial-gradient(circle, #4c566a 1px, transparent 1px);
     background-size: 6px 6px;
     background-repeat: repeat-y;
