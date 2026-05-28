@@ -243,6 +243,34 @@ fn register_bundled_icons(display: &gdk::Display) {
     theme.add_search_path("/usr/local/share/wafflebar/icons");
 }
 
+/// Attach a calendar popover to a clock slot's **container** (not its time label). The container
+/// persists across the per-minute re-render, so the popover — and an open calendar — survive ticks;
+/// only the inner label is reconciled. `show_calendar` (default on) gates it; `show_week_numbers`
+/// toggles the week column. No-op for non-clock modules. (Host-rendered like the apps menu.)
+fn attach_clock_calendar(
+    container: &gtk4::Box,
+    mcfg: &wafflebar_core::ModuleConfig,
+    position: Position,
+) {
+    if mcfg.kind != "clock" || !mcfg.opt_bool("show_calendar").unwrap_or(true) {
+        return;
+    }
+    let cal = gtk4::Calendar::new();
+    cal.set_show_week_numbers(mcfg.opt_bool("show_week_numbers").unwrap_or(false));
+    let popover = gtk4::Popover::new();
+    popover.set_child(Some(&cal));
+    popover.set_autohide(true);
+    popover.set_position(match position {
+        Position::Top => gtk4::PositionType::Bottom, // top bar → open downward
+        Position::Bottom => gtk4::PositionType::Top,
+    });
+    popover.set_parent(container);
+    let gesture = gtk4::GestureClick::new();
+    gesture.set_button(gdk::BUTTON_PRIMARY);
+    gesture.connect_released(move |_, _, _, _| popover.popup());
+    container.add_controller(gesture);
+}
+
 /// Apply the `[bar]` layer-shell layout (edge anchors + exclusive zone + height). gtk4-layer-shell
 /// reconfigures a *mapped* surface, so this works live for a reposition (F2c) — no window recreate.
 fn apply_bar_layout(window: &ApplicationWindow, bar: &wafflebar_core::BarConfig) {
@@ -310,6 +338,7 @@ fn populate_pack(
             Align::Start | Align::Fill => &start,
         };
         group.append(&container);
+        attach_clock_calendar(&container, mcfg, config.bar.position);
         slots.push(PluginSlot {
             kind: placement.kind.clone(),
             module,
@@ -370,6 +399,7 @@ fn populate_grid_inner(
             placement.colspan as i32,
             placement.rowspan as i32,
         );
+        attach_clock_calendar(&container, mcfg, config.bar.position);
         slots.push(PluginSlot {
             kind: placement.kind.clone(),
             module,

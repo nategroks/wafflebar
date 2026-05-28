@@ -148,12 +148,14 @@ mod schema_tests {
     #[test]
     fn schemas_describe_known_option_keys() {
         let clock = config_schema("clock");
-        assert_eq!(clock.len(), 2);
         assert_eq!(clock[0].key, "format");
         assert!(matches!(clock[0].kind, FieldKind::Text { .. }));
         assert!(clock
             .iter()
             .any(|f| f.key == "timezone" && matches!(f.kind, FieldKind::Text { .. })));
+        assert!(clock
+            .iter()
+            .any(|f| f.key == "show_week_numbers" && matches!(f.kind, FieldKind::Bool { .. })));
 
         assert!(config_schema("separator")
             .iter()

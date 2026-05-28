@@ -71,6 +71,11 @@ impl Plugin for Clock {
         vec![
             ConfigField::text("format", "Time format (strftime)", DEFAULT_FORMAT),
             ConfigField::text("timezone", "Timezone (IANA, e.g. America/Chicago; blank = system)", ""),
+            // `show_calendar` / `show_week_numbers` are consumed host-side (the host attaches a
+            // GtkCalendar popover to the clock's slot container — see app.rs::attach_clock_calendar
+            // — so the per-minute tick can't close an open calendar). Declared here for the prefs UI.
+            ConfigField::bool("show_calendar", "Calendar popover on click", true),
+            ConfigField::bool("show_week_numbers", "Show week numbers in the calendar", false),
         ]
     }
 }
