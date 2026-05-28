@@ -8,7 +8,7 @@ use std::rc::Rc;
 use gtk4::gdk;
 use gtk4::glib;
 use gtk4::prelude::*;
-use gtk4::{Application, ApplicationWindow, CssProvider, Grid, Orientation};
+use gtk4::{Application, ApplicationWindow, Grid, Orientation};
 use gtk4_layer_shell::{Edge, Layer, LayerShell};
 use tracing::{debug, info, warn};
 use wafflebar_core::{
@@ -26,9 +26,6 @@ use crate::plugins::volume::backend::PulseBackend;
 use crate::render::{Host, PluginSlot};
 use crate::wm::{connect_backend, WmConnection};
 
-/// Built-in Nord theme used when the config doesn't point at a CSS file.
-const DEFAULT_CSS: &str = include_str!("../../../themes/nord.css");
-
 /// Build the bar(s) on the selected monitor(s), wiring each to the shared dwl backend.
 /// `config_path` (when present) is watched for live reload.
 pub fn build_bars(
@@ -42,7 +39,7 @@ pub fn build_bars(
         warn!("no GDK display; cannot create bars");
         return;
     };
-    load_css(&display, config.bar.theme.as_deref());
+    crate::theme::install(&display, config_path);
 
     // Notifications (G) — session-wide, started once per process (not per monitor). The server owns
     // org.freedesktop.Notifications; the stack renders incoming notifications as top-right popups.
@@ -670,25 +667,6 @@ fn apply_align(widget: &impl IsA<gtk4::Widget>, align: Align) {
     widget.set_valign(gtk4::Align::Center);
 }
 
-fn load_css(display: &gdk::Display, theme: Option<&str>) {
-    let provider = CssProvider::new();
-    match theme {
-        Some(path) if std::path::Path::new(path).exists() => {
-            provider.load_from_path(path);
-            debug!(path, "loaded theme css");
-        }
-        Some(path) => {
-            warn!(path, "theme css not found; using built-in Nord");
-            provider.load_from_string(DEFAULT_CSS);
-        }
-        None => provider.load_from_string(DEFAULT_CSS),
-    }
-    gtk4::style_context_add_provider_for_display(
-        display,
-        &provider,
-        gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
-    );
-}
 
 #[cfg(test)]
 mod tests {

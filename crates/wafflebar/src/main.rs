@@ -12,6 +12,7 @@ mod notify;
 mod notify_ui;
 mod plugins;
 mod prefs;
+mod theme;
 mod render;
 mod shell;
 mod wm;
