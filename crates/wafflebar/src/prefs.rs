@@ -19,22 +19,11 @@ use std::rc::Rc;
 use gtk4::glib;
 use gtk4::prelude::*;
 use gtk4::{
-    Align, Application, ApplicationWindow, Button, DropDown, Entry, EventControllerFocus, Image,
-    Label, ListBox, ListBoxRow, Orientation, ScrolledWindow, SearchEntry, SpinButton, Switch,
+    Align, Button, DropDown, Entry, EventControllerFocus, Image, Label, ListBox, ListBoxRow,
+    Orientation, Popover, ScrolledWindow, SearchEntry, SpinButton, Switch,
 };
-use gtk4_layer_shell::{KeyboardMode, Layer, LayerShell};
 use tracing::warn;
 use wafflebar_core::{Config, ConfigField, FieldKind, Position};
-
-/// Make a window a centered, floating layer-shell **overlay** instead of a normal toplevel, so a
-/// tiling compositor (dwl/sway/i3) won't tile it to half the screen. No edge anchors → the
-/// compositor centers the surface at its requested size; `OnDemand` keyboard so text entry works.
-/// Must be called before the window is presented.
-fn float_overlay(win: &impl LayerShell) {
-    win.init_layer_shell();
-    win.set_layer(Layer::Overlay);
-    win.set_keyboard_mode(KeyboardMode::OnDemand);
-}
 
 use crate::plugins;
 
@@ -45,12 +34,14 @@ enum Target {
     Module(usize),
 }
 
-/// Shared handles for the open window. `window`/`form` are `Weak` so handlers owned by those widgets
-/// don't form a reference cycle (the window would never be freed) — same discipline as `Weak<Host>`.
+/// Shared handles for the open Settings popover. `popover`/`parent`/`form` are `Weak` so handlers
+/// owned by those widgets don't form a reference cycle — same discipline as `Weak<Host>`. `parent`
+/// is the bar widget the popover is anchored to (needed to rebuild on add/remove).
 #[derive(Clone)]
 struct Ctx {
     path: Rc<PathBuf>,
-    window: glib::WeakRef<ApplicationWindow>,
+    popover: glib::WeakRef<Popover>,
+    parent: glib::WeakRef<gtk4::Widget>,
     form: glib::WeakRef<gtk4::Box>,
 }
 
@@ -62,22 +53,22 @@ impl Ctx {
         }
     }
 
-    /// Reopen the whole window (after adding/removing a module — the left list changed). Simpler and
-    /// leak-free versus an in-place list refresh, at the cost of a brief window flash on the rare
-    /// add/remove action.
+    /// Reopen Settings (after adding/removing a module — the left list changed): pop down the
+    /// current popover and build a fresh one on the same bar parent. Simpler and leak-free versus
+    /// an in-place list refresh.
     fn reopen(&self) {
-        if let (Some(win), Some(app)) =
-            (self.window.upgrade(), self.window.upgrade().and_then(|w| w.application()))
-        {
+        if let (Some(pop), Some(parent)) = (self.popover.upgrade(), self.parent.upgrade()) {
             let path = (*self.path).clone();
-            win.close();
-            open(&app, &path);
+            pop.popdown();
+            open(&parent, &path);
         }
     }
 }
 
-/// Open the preferences window over the running bar.
-pub fn open(app: &Application, config_path: &Path) {
+/// Open the preferences popover, anchored to `parent` (the bar). A popover is an xdg-popup: it
+/// floats (the WM doesn't tile it), grabs the keyboard for text entry, and dismisses on click-out /
+/// Escape — unlike the layer-shell window it replaces.
+pub fn open(parent: &impl gtk4::prelude::IsA<gtk4::Widget>, config_path: &Path) {
     let config = match Config::load(config_path) {
         Ok(c) => c,
         Err(e) => {
@@ -87,20 +78,25 @@ pub fn open(app: &Application, config_path: &Path) {
     };
     let path = Rc::new(config_path.to_path_buf());
 
-    let window = ApplicationWindow::builder()
-        .application(app)
-        .title("wafflebar settings")
-        .default_width(620)
-        .default_height(460)
-        .build();
-    float_overlay(&window); // centered overlay, not tiled by the WM
+    let parent_w = parent.upcast_ref::<gtk4::Widget>();
+    let popover = Popover::new();
+    popover.set_autohide(true);
+    popover.set_has_arrow(false);
+    popover.set_parent(parent_w);
+    popover.set_position(gtk4::PositionType::Bottom); // drop down from the (top) bar
+
     let form = gtk4::Box::new(Orientation::Vertical, 8);
     form.set_margin_top(12);
     form.set_margin_bottom(12);
     form.set_margin_start(12);
     form.set_margin_end(12);
 
-    let ctx = Ctx { path, window: window.downgrade(), form: form.downgrade() };
+    let ctx = Ctx {
+        path,
+        popover: popover.downgrade(),
+        parent: parent_w.downgrade(),
+        form: form.downgrade(),
+    };
 
     // Left: target list (Bar + each module) over an "Add Item" button.
     let list = ListBox::new();
@@ -133,13 +129,14 @@ pub fn open(app: &Application, config_path: &Path) {
     left.append(&add_btn);
 
     let split = gtk4::Box::new(Orientation::Horizontal, 0);
+    split.set_size_request(620, 460); // a popover sizes to content — give the form room
     split.append(&left);
     split.append(&gtk4::Separator::new(Orientation::Vertical));
     split.append(&ScrolledWindow::builder().child(&form).hexpand(true).build());
-    window.set_child(Some(&split));
+    popover.set_child(Some(&split));
 
     list.select_row(list.row_at_index(0).as_ref()); // open to the Bar form, never empty
-    window.present();
+    popover.popup();
 }
 
 fn list_row(text: &str) -> ListBoxRow {
@@ -399,7 +396,7 @@ fn wire_item_edit(
 /// Modal application picker (F4): a searchable list of installed `.desktop` apps; picking one
 /// appends its id to the launcher's items.
 fn open_app_picker(ctx: &Ctx, target: Target, key: &str, existing: Vec<String>) {
-    let Some(parent) = ctx.window.upgrade() else { return };
+    let Some(anchor) = ctx.popover.upgrade() else { return };
     let rows = wafflebar_core::list_applications()
         .into_iter()
         .map(|app| PickerRow {
@@ -411,7 +408,7 @@ fn open_app_picker(ctx: &Ctx, target: Target, key: &str, existing: Vec<String>) 
         })
         .collect();
     let (ctx, key) = (ctx.clone(), key.to_string());
-    open_picker(&parent, "Add Application", rows, move |file_id| {
+    open_picker(&anchor, "Add Application", rows, move |file_id| {
         let mut items = existing.clone();
         items.push(file_id.to_string());
         if let Target::Module(i) = target {
@@ -424,7 +421,7 @@ fn open_app_picker(ctx: &Ctx, target: Target, key: &str, existing: Vec<String>) 
 /// Modal Add Items dialog (F4): the plugin catalog as a searchable list; picking a kind appends a
 /// `[[modules]]` entry and reopens the window.
 fn open_add_items(ctx: &Ctx) {
-    let Some(parent) = ctx.window.upgrade() else { return };
+    let Some(anchor) = ctx.popover.upgrade() else { return };
     let config = Config::load(&*ctx.path).unwrap_or_default();
     let present: std::collections::HashSet<&str> =
         config.modules.iter().map(|m| m.kind.as_str()).collect();
@@ -449,7 +446,7 @@ fn open_add_items(ctx: &Ctx) {
         .collect();
 
     let ctx = ctx.clone();
-    open_picker(&parent, "Add Item", rows, move |kind| {
+    open_picker(&anchor, "Add Item", rows, move |kind| {
         append_module(&ctx.path, kind, next_col);
         ctx.reopen();
     });
@@ -466,31 +463,35 @@ struct PickerRow {
 }
 
 /// A searchable single-select list, calling `on_pick(payload)` on activation. Shared by Add Items
-/// and the application picker. Rendered as a floating layer-shell overlay (above Settings, not
-/// tiled by the WM); `transient_for`/`modal` don't apply to layer surfaces. `_parent` is retained
-/// for the call shape (and a future re-anchor to Settings if desired).
+/// and the application picker. Rendered as a nested popover anchored to `anchor` (the Settings
+/// popover) — an xdg-popup, so it floats over Settings, grabs the keyboard for the search, and
+/// dismisses on click-out, without being tiled by the WM.
 fn open_picker(
-    _parent: &ApplicationWindow,
+    anchor: &impl gtk4::prelude::IsA<gtk4::Widget>,
     title: &str,
     rows: Vec<PickerRow>,
     on_pick: impl Fn(&str) + 'static,
 ) {
-    let win = gtk4::Window::builder()
-        .title(title)
-        .default_width(440)
-        .default_height(480)
-        .build();
-    float_overlay(&win); // floating overlay above Settings, not tiled
+    let popover = Popover::new();
+    popover.set_autohide(true);
+    popover.set_has_arrow(false);
+    popover.set_parent(anchor.upcast_ref::<gtk4::Widget>());
+
     let vbox = gtk4::Box::new(Orientation::Vertical, 6);
+    vbox.set_size_request(440, 480); // a popover sizes to content
     vbox.set_margin_top(8);
     vbox.set_margin_bottom(8);
     vbox.set_margin_start(8);
     vbox.set_margin_end(8);
+    let header = Label::new(Some(title));
+    header.set_xalign(0.0);
+    header.set_margin_bottom(4);
+    vbox.append(&header);
 
     if rows.is_empty() {
         vbox.append(&dim_label("No applications found."));
-        win.set_child(Some(&vbox));
-        win.present();
+        popover.set_child(Some(&vbox));
+        popover.popup();
         return;
     }
 
@@ -537,13 +538,13 @@ fn open_picker(
         move |_| listbox.invalidate_filter()
     });
     listbox.connect_row_activated({
-        let (rows, win) = (rows.clone(), win.downgrade());
+        let (rows, pop) = (rows.clone(), popover.downgrade());
         move |_, row| {
             if let Some(r) = rows.get(row.index() as usize) {
                 if r.sensitive {
                     on_pick(&r.payload);
-                    if let Some(w) = win.upgrade() {
-                        w.close();
+                    if let Some(p) = pop.upgrade() {
+                        p.popdown();
                     }
                 }
             }
@@ -552,8 +553,8 @@ fn open_picker(
 
     vbox.append(&search);
     vbox.append(&ScrolledWindow::builder().child(&listbox).vexpand(true).build());
-    win.set_child(Some(&vbox));
-    win.present();
+    popover.set_child(Some(&vbox));
+    popover.popup();
 }
 
 /// The bar's own settings, described against the `[bar]` table (host-owned, not from a plugin).
