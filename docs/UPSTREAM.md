@@ -365,6 +365,17 @@ capture phase** (`set_propagation_phase(Capture)`) to decide routing *before* a 
 built-in nav fires. Bubble phase is too late — the ListBox has already moved its selection. Return
 `Proceed` for the keys you don't handle so native editing (text cursor, insert) still works.
 
+## Multi-compositor: data trait in core, plumbing trait in the binary
+`core::WindowManager` is the **GTK-free data abstraction** (snapshot/execute over `Tag`/`Window`/
+`WmCommand`) — the test `FakeWm` implements it without a socket. The **event-loop plumbing** (`fd()`
+to watch, `dispatch()` to drain) lives in a *binary* supertrait `WmConnection: WindowManager`, because
+it's a host I/O concern, not data — putting it on the core trait would force `FakeWm` to fake a
+socket. The host holds `Rc<RefCell<dyn WmConnection>>` and `connect_backend()` picks the compositor.
+The four M2 stub backends (river/Hyprland/i3/bspwm) were **deleted because the trait validated**, not
+abandoned: they were scaffolding to check the data model against multiple mental models; with dwl
+(bitmask tags) and sway (named workspaces) both fitting `Tag{index,name}`, the scaffolding's done.
+river/Hyprland/bspwm return as focused PRs; i3 rides the sway backend (shared i3-ipc).
+
 ## Roadmap (phases, each tied to a real directory)
 - **A** finish M2 — `tasklist` (this PR).
 - **B** plugin framework — `Plugin::configure` (per-instance TOML + `notify` live-reload), `launcher`, `separator`/`showdesktop`.
