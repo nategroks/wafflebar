@@ -5,6 +5,7 @@
 //! special code path, just another `Plugin`.
 
 pub mod appmenu;
+pub mod bluetooth;
 pub mod clock;
 pub mod cpu;
 pub mod dwl;
@@ -42,6 +43,7 @@ pub fn build(kind: &str, output: &str, cfg: &ModuleConfig, caps: &Caps) -> Box<d
         "memory" => Box::new(memory::Memory::new()),
         "cpu" => Box::new(cpu::Cpu::new()),
         "statustray" => Box::new(statustray::StatusTray::new()),
+        "bluetooth" => Box::new(bluetooth::Bluetooth::new()),
         other => Box::new(Placeholder::new(other)),
     }
 }
@@ -84,6 +86,7 @@ pub fn catalog() -> Vec<PluginInfo> {
         info("volume", "Volume", "Audio volume. Starting its backend needs a restart.", "audio-volume-medium-symbolic", false),
         info("network", "Network", "Connection status. Starting its backend needs a restart.", "network-wireless-symbolic", false),
         info("statustray", "System tray", "Status-notifier icons from running apps.", "preferences-system-notifications-symbolic", true),
+        info("bluetooth", "Bluetooth", "Adapter power + paired devices. Starting its backend needs a restart.", "bluetooth-symbolic", true),
     ]
 }
 

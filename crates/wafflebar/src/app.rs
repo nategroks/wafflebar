@@ -12,14 +12,15 @@ use gtk4::{Application, ApplicationWindow, CenterBox, Grid, Orientation};
 use gtk4_layer_shell::{Edge, Layer, LayerShell};
 use tracing::{debug, info, warn};
 use wafflebar_core::{
-    Align, Config, Event, GridEngine, Launch, Layout, Position, Topic, TrayCommand, VolumeCommand,
-    WmCommand,
+    Align, BluetoothCommand, Config, Event, GridEngine, Launch, Layout, Position, Topic,
+    TrayCommand, VolumeCommand, WmCommand,
 };
 
 use crate::event_loop;
 use crate::plugins;
 use crate::plugins::cpu::backend::{CpuBackend, ProcStatBackend};
 use crate::plugins::memory::backend::{MemoryBackend, ProcMemBackend};
+use crate::plugins::bluetooth::backend::BtBackend;
 use crate::plugins::network::backend::{NetworkBackend, NmBackend};
 use crate::plugins::statustray::backend::SniBackend;
 use crate::plugins::volume::backend::PulseBackend;
@@ -222,6 +223,7 @@ fn present_bar(
                     host.subscribes(&Topic::Audio),
                     host.subscribes(&Topic::Network),
                     host.subscribes(&Topic::Tray),
+                    host.subscribes(&Topic::Bluetooth),
                 );
                 apply_bar_layout(&window, &new_config.bar, monitor_width);
                 host.set_position(new_config.bar.position);
@@ -488,6 +490,7 @@ fn build_grid_and_host(
     let needs_audio = subscribes(&Topic::Audio);
     let needs_network = subscribes(&Topic::Network);
     let needs_tray = subscribes(&Topic::Tray);
+    let needs_bluetooth = subscribes(&Topic::Bluetooth);
     // The applications menu has no event topic; key off the placed module kind.
     let needs_appmenu = slots.iter().any(|s| s.kind == "appmenu");
     // Backend-class plugins (volume/network/tray) are reconciled through a host-owned `Backends`
@@ -518,18 +521,28 @@ fn build_grid_and_host(
         })
     };
 
+    let bluetooth_sink: Box<dyn Fn(&BluetoothCommand)> = {
+        let backends = backends.clone();
+        Box::new(move |cmd| {
+            if let Some(b) = backends.borrow().bluetooth.as_ref() {
+                b.execute(cmd);
+            }
+        })
+    };
+
     let host = Host::new(
         slots,
         command_sink,
         launch_sink,
         volume_sink,
         tray_sink,
+        bluetooth_sink,
         config.bar.position,
         config.bar.effective_icon_size(),
     );
 
     // Start the backends the initial module set needs (re-run on every structural reload).
-    reconcile_backends(&backends, &host, needs_audio, needs_network, needs_tray);
+    reconcile_backends(&backends, &host, needs_audio, needs_network, needs_tray, needs_bluetooth);
 
     // Host-attached volume mixer popovers (needs the host + GTK, so it can't ride in populate).
     host.attach_volume_mixers();
@@ -573,6 +586,8 @@ struct Backends {
     tray: Option<Rc<SniBackend>>,
     /// The network subscription future; `abort()` is its cancellation handle (drops the proxy).
     network: Option<glib::JoinHandle<()>>,
+    /// The BlueZ backend (poll future + shared connection for commands); `stop()` aborts the loop.
+    bluetooth: Option<Rc<BtBackend>>,
 }
 
 /// What reconciling one backend against the new module set requires.
@@ -601,6 +616,7 @@ fn reconcile_backends(
     want_audio: bool,
     want_network: bool,
     want_tray: bool,
+    want_bluetooth: bool,
 ) {
     // Audio (libpulse): start connects + wires delivery; stop drops the backend (Drop disconnects
     // the context + releases the glib-mainloop integration).
@@ -658,6 +674,28 @@ fn reconcile_backends(
             }
         }));
         backends.borrow_mut().tray = Some(b);
+    }
+
+    // Bluetooth (BlueZ poll future): start/stop like network, but the backend is an Rc we keep (the
+    // command sink calls execute() on it); stop() aborts its poll loop.
+    let has_bluetooth = backends.borrow().bluetooth.is_some();
+    match reconcile_action(want_bluetooth, has_bluetooth) {
+        BackendAction::Start => {
+            let b = BtBackend::new();
+            let host_weak = Rc::downgrade(host);
+            b.start(Rc::new(move |state| {
+                if let Some(h) = host_weak.upgrade() {
+                    h.deliver_event(&Event::Bluetooth(state));
+                }
+            }));
+            backends.borrow_mut().bluetooth = Some(b);
+        }
+        BackendAction::Stop => {
+            if let Some(b) = backends.borrow_mut().bluetooth.take() {
+                b.stop();
+            }
+        }
+        BackendAction::None => {}
     }
 }
 
@@ -858,6 +896,7 @@ mod tests {
             Box::new(|_: &Launch| {}),
             Box::new(|_: &VolumeCommand| {}),
             Box::new(|_: &TrayCommand| {}),
+            Box::new(|_: &wafflebar_core::BluetoothCommand| {}),
             Position::Top,
             18,
         )
