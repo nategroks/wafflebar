@@ -62,10 +62,16 @@ impl Ctx {
     /// Reopen Settings (after adding/removing a module — the left list changed): close the current
     /// panel and build a fresh one. Simpler and leak-free versus an in-place list refresh.
     fn reopen(&self) {
+        self.reopen_to(None);
+    }
+
+    /// Like [`reopen`](Self::reopen), but select module `select` afterward (the edit-current-item
+    /// deep link — e.g. jump straight to a freshly-added module's form). `None` selects the Bar.
+    fn reopen_to(&self, select: Option<usize>) {
         if let Some(win) = self.window.upgrade() {
             let path = (*self.path).clone();
             win.destroy();
-            open(&path);
+            open_at(&path, select);
         }
     }
 }
@@ -74,6 +80,11 @@ impl Ctx {
 /// [`crate::dropdown`]): it floats (not tiled), accepts keyboard for text entry on dwl (which a
 /// GtkPopover can't), and closes via the ✕ button or Escape.
 pub fn open(config_path: &Path) {
+    open_at(config_path, None);
+}
+
+/// Open Settings, optionally selecting module `select` (a deep link; `None` → the Bar row).
+fn open_at(config_path: &Path, select: Option<usize>) {
     let config = match Config::load(config_path) {
         Ok(c) => c,
         Err(e) => {
@@ -242,7 +253,13 @@ pub fn open(config_path: &Path) {
     root.append(&split);
     window.set_child(Some(&root));
 
-    list.select_row(list.row_at_index(0).as_ref()); // open to the Bar form, never empty
+    // Select the deep-link target (module row = index+1; row 0 is the Bar), else the Bar. Falls back
+    // to the Bar if the index is out of range.
+    let row_index = match select {
+        Some(i) if (i as i32) < config.modules.len() as i32 => i as i32 + 1,
+        _ => 0,
+    };
+    list.select_row(list.row_at_index(row_index).as_ref());
     window.present();
 }
 
@@ -271,6 +288,21 @@ fn build_form(form: &gtk4::Box, target: Target, ctx: &Ctx) {
             return;
         }
     };
+
+    // Per-plugin "About" header: the module's display name + what it is, from the catalog.
+    if let Target::Module(i) = target {
+        if let Some(m) = config.modules.get(i) {
+            if let Some(info) = plugins::catalog().into_iter().find(|p| p.kind == m.kind) {
+                let name = Label::new(None);
+                name.set_xalign(0.0);
+                name.set_markup(&format!("<b>{}</b>", info.name)); // names are static, no markup chars
+                form.append(&name);
+                let about = dim_label(info.description);
+                about.set_margin_bottom(8);
+                form.append(&about);
+            }
+        }
+    }
 
     let fields = match target {
         Target::Bar => bar_config_schema(),
@@ -552,10 +584,12 @@ fn open_add_items(ctx: &Ctx) {
         })
         .collect();
 
+    // The appended module lands at the end, so its index is the current module count.
+    let new_index = config.modules.len();
     let ctx = ctx.clone();
     open_picker("Add Item", ctx.position, rows, move |kind| {
         append_module(&ctx.path, kind, next_col);
-        ctx.reopen();
+        ctx.reopen_to(Some(new_index)); // deep-link straight to the just-added module's form
     });
 }
 
