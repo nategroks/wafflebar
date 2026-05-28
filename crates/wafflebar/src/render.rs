@@ -80,6 +80,11 @@ impl Host {
         self.position.set(position);
     }
 
+    /// The bar's current edge (used to anchor dropdowns above/below the bar).
+    pub fn position(&self) -> Position {
+        self.position.get()
+    }
+
     /// The effective icon pixel size for bar glyphs (see the `icon_size` field).
     pub fn icon_size(&self) -> u32 {
         self.icon_size.get()
@@ -495,7 +500,7 @@ fn build_appmenu_dropdown(trigger: &View, content: &View, slot: usize, host: &Rc
             return;
         }
         let win = gtk4::Window::builder().default_width(420).default_height(520).build();
-        crate::dropdown::panel(&win);
+        crate::dropdown::panel(&win, host.position());
         win.set_child(Some(&render_view(&content, slot, &host)));
         win.present();
     });

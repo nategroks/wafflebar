@@ -295,8 +295,17 @@ pub fn build_appmenu(favorites: &[String], show_recents: bool, max_recents: u32,
 
     let panes = GtkBox::new(Orientation::Horizontal, 6);
     panes.set_vexpand(true);
-    panes.append(&scroll(&cat_list));
-    panes.append(&scroll(&app_list));
+    // The category pane needs a *reserved* width: a ScrolledWindow doesn't propagate its child's
+    // width request, so without this the hexpanding app pane eats its space and the two overlap
+    // (category labels clipped behind the app icons/titles). Fix its width + drop horizontal scroll.
+    let cat_scroll = scroll(&cat_list);
+    cat_scroll.set_width_request(150);
+    cat_scroll.set_hexpand(false);
+    cat_scroll.set_hscrollbar_policy(gtk4::PolicyType::Never);
+    let app_scroll = scroll(&app_list);
+    app_scroll.set_hexpand(true);
+    panes.append(&cat_scroll);
+    panes.append(&app_scroll);
     root.append(&search);
     root.append(&panes);
     root.upcast()
