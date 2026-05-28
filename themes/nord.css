@@ -16,6 +16,11 @@ window#wafflebar {
 
 #grid {
     margin: 0 4px;
+    /* The visible bar surface is this container, NOT window#wafflebar: a non-transparent system GTK
+     * theme paints the grid and covers the window node, so the window's background never shows.
+     * Paint the bar background here. See docs/STYLING.md. */
+    background-color: #2e3440;
+    color: #d8dee9;
 }
 
 .module {
