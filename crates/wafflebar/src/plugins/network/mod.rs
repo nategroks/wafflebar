@@ -8,7 +8,14 @@
 
 pub mod backend;
 
-use wafflebar_core::{ActionId, Event, NetworkState, Plugin, Reaction, Topic, View};
+use wafflebar_core::{
+    ActionId, ConfigField, Event, ModuleConfig, NetworkState, Plugin, Reaction, Topic, View,
+};
+
+/// Read the `max_chars` option (0 = no truncation). Shared by the registry and `configure`.
+pub(crate) fn read_max_chars(cfg: &ModuleConfig) -> usize {
+    cfg.opt_i64("max_chars").unwrap_or(0).max(0) as usize
+}
 
 const ACTION_OPEN: &str = "open-editor";
 // TODO(network): make the editor command configurable; fall back to nmtui-in-a-terminal.
@@ -17,6 +24,9 @@ const EDITOR_CMD: &str = "nm-connection-editor";
 pub struct Network {
     /// Derived display, `None` until the first event (or if NM is absent → backend never emits).
     display: Option<Display>,
+    /// Truncate the connection-name label to this many characters (0 = unlimited). Applied at
+    /// render so a reconfigure re-truncates the same stored name without needing the raw state.
+    max_chars: usize,
 }
 
 /// What actually drives the rendered widgets. Coarser than [`NetworkState`]: wifi strength is
@@ -28,14 +38,23 @@ struct Display {
 }
 
 impl Network {
-    pub fn new() -> Self {
-        Self { display: None }
+    pub fn new(max_chars: usize) -> Self {
+        Self { display: None, max_chars }
+    }
+
+    /// Truncate `s` to `self.max_chars` characters, ellipsizing. Mirrors the `window` plugin.
+    fn truncate(&self, s: &str) -> String {
+        if self.max_chars == 0 || s.chars().count() <= self.max_chars {
+            return s.to_string();
+        }
+        let t: String = s.chars().take(self.max_chars.saturating_sub(1)).collect();
+        format!("{t}…")
     }
 }
 
 impl Default for Network {
     fn default() -> Self {
-        Self::new()
+        Self::new(0)
     }
 }
 
@@ -83,7 +102,7 @@ impl Plugin for Network {
         View::row(
             vec![
                 View::icon(d.icon, 16).with_class("net-icon"),
-                View::label(&d.label).with_class("net-label"),
+                View::label(self.truncate(&d.label)).with_class("net-label"),
             ],
             4,
         )
@@ -112,6 +131,16 @@ impl Plugin for Network {
         }
         Reaction::none()
     }
+
+    fn configure(&mut self, cfg: &ModuleConfig) -> Reaction {
+        // Re-read the limit; the stored display is re-truncated at render, so no state is needed.
+        self.max_chars = read_max_chars(cfg);
+        Reaction::dirty()
+    }
+
+    fn config_schema(&self) -> Vec<ConfigField> {
+        vec![ConfigField::int("max_chars", "Max characters (0 = unlimited)", 0, 200, 0)]
+    }
 }
 
 #[cfg(test)]
@@ -124,7 +153,7 @@ mod tests {
 
     #[test]
     fn first_event_paints_then_identical_is_noop() {
-        let mut n = Network::new();
+        let mut n = Network::new(0);
         assert!(n.on_event(&Event::Network(NetworkState::Wired { name: "eth0".into() })).dirty);
         assert!(!n
             .on_event(&Event::Network(NetworkState::Wired { name: "eth0".into() }))
@@ -134,7 +163,7 @@ mod tests {
     #[test]
     fn wifi_strength_jitter_within_bucket_does_not_dirty() {
         // NM bursts strength updates; within a signal bucket the displayed state is unchanged.
-        let mut n = Network::new();
+        let mut n = Network::new(0);
         assert!(n.on_event(&wireless("home", 70)).dirty);
         assert!(!n.on_event(&wireless("home", 72)).dirty, "70 and 72 are both 'good'");
         assert!(!n.on_event(&wireless("home", 85)).dirty, "85 still 'good'");
@@ -142,14 +171,14 @@ mod tests {
 
     #[test]
     fn crossing_a_bucket_dirties() {
-        let mut n = Network::new();
+        let mut n = Network::new(0);
         n.on_event(&wireless("home", 70)); // good
         assert!(n.on_event(&wireless("home", 90)).dirty, "good -> excellent repaints");
     }
 
     #[test]
     fn state_transitions_dirty_and_change_the_view() {
-        let mut n = Network::new();
+        let mut n = Network::new(0);
         n.on_event(&Event::Network(NetworkState::Wired { name: "eth0".into() }));
         assert!(n.on_event(&Event::Network(NetworkState::Disconnected)).dirty);
         match n.view() {
@@ -163,12 +192,36 @@ mod tests {
 
     #[test]
     fn no_state_renders_nothing() {
-        assert_eq!(Network::new().view(), View::Empty);
+        assert_eq!(Network::new(0).view(), View::Empty);
+    }
+
+    #[test]
+    fn long_name_truncates_at_max_chars() {
+        let mut n = Network::new(5);
+        n.on_event(&Event::Network(NetworkState::Wired {
+            name: "Wired connection 1".into(),
+        }));
+        match n.view() {
+            View::Button { child, .. } => {
+                let View::Row { children, .. } = *child else { panic!("row") };
+                assert!(matches!(&children[1], View::Label { text, .. } if text == "Wire…"));
+            }
+            _ => panic!("expected button"),
+        }
+        // Reconfigure to unlimited re-renders the full name from the stored display.
+        n.configure(&crate::plugins::test_module_config(&[("max_chars", toml::Value::from(0))]));
+        match n.view() {
+            View::Button { child, .. } => {
+                let View::Row { children, .. } = *child else { panic!("row") };
+                assert!(matches!(&children[1], View::Label { text, .. } if text == "Wired connection 1"));
+            }
+            _ => panic!("expected button"),
+        }
     }
 
     #[test]
     fn click_opens_the_editor() {
-        let mut n = Network::new();
+        let mut n = Network::new(0);
         assert_eq!(
             n.on_action(&ActionId::new(ACTION_OPEN)).spawn,
             vec![vec![EDITOR_CMD.to_string()]]

@@ -33,7 +33,7 @@ pub mod view;
 pub mod wm;
 
 pub use config::{
-    Align, BarConfig, Cell, Config, ConfigError, GridConfig, ModuleConfig, Position,
+    Align, BarConfig, Cell, Config, ConfigError, GridConfig, Layout, ModuleConfig, Position,
     SCHEMA_VERSION,
 };
 pub use audio::{VolumeCommand, VolumeEvent, VOLUME_NORM};

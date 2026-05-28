@@ -63,6 +63,10 @@ pub struct BarConfig {
     /// Top or bottom edge.
     #[serde(default)]
     pub position: Position,
+    /// How modules are arranged: `"pack"` (default — xfce4-panel-style, group by `align` and pack
+    /// tight to each edge) or `"grid"` (explicit `rows × columns` cell placement).
+    #[serde(default)]
+    pub layout: Layout,
     /// Bar thickness in pixels (also the layer-shell exclusive zone).
     #[serde(default = "default_height")]
     pub height: u32,
@@ -76,6 +80,7 @@ impl Default for BarConfig {
         Self {
             monitor: default_monitor(),
             position: Position::Top,
+            layout: Layout::default(),
             height: default_height(),
             theme: None,
         }
@@ -97,6 +102,21 @@ pub enum Position {
     #[default]
     Top,
     Bottom,
+}
+
+/// How the bar arranges its modules.
+///
+/// `Pack` (default) is the xfce4-panel model: modules are grouped by their [`Align`]
+/// (`Start` packs flush-left, `End` flush-right, `Center` centered), sized to their content, with
+/// the slack between groups absorbed automatically — `cell`/`colspan`/`rowspan` are ignored.
+/// `Grid` keeps the explicit `rows × columns` track with per-module `cell` placement. Any config
+/// with `rows > 1` uses the grid path regardless of this setting (packing is single-row).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum Layout {
+    #[default]
+    Pack,
+    Grid,
 }
 
 /// The grid track: a `rows × columns` matrix that modules are placed into.
@@ -236,17 +256,29 @@ impl Config {
 }
 
 impl Default for Config {
-    /// A minimal sensible default: a top bar with a single centered clock.
+    /// A minimal sensible default (used when no config file exists): a top pack-bar with an
+    /// applications menu flush-left and a clock flush-right.
     fn default() -> Self {
-        let mut clock = ModuleConfig {
-            kind: "clock".to_string(),
+        let appmenu = ModuleConfig {
+            kind: "appmenu".to_string(),
             cell: Cell {
                 row: 0,
                 col: 0,
                 rowspan: 1,
                 colspan: 1,
             },
-            align: Align::Center,
+            align: Align::Start,
+            options: BTreeMap::new(),
+        };
+        let mut clock = ModuleConfig {
+            kind: "clock".to_string(),
+            cell: Cell {
+                row: 0,
+                col: 1,
+                rowspan: 1,
+                colspan: 1,
+            },
+            align: Align::End,
             options: BTreeMap::new(),
         };
         clock.options.insert(
@@ -258,9 +290,9 @@ impl Default for Config {
             bar: BarConfig::default(),
             grid: GridConfig {
                 rows: 1,
-                columns: 1,
+                columns: 2,
             },
-            modules: vec![clock],
+            modules: vec![appmenu, clock],
         }
     }
 }
@@ -309,9 +341,12 @@ mod tests {
     }
 
     #[test]
-    fn default_config_has_clock() {
+    fn default_config_is_appmenu_and_clock_packed() {
         let cfg = Config::default();
-        assert_eq!(cfg.modules.len(), 1);
-        assert_eq!(cfg.modules[0].kind, "clock");
+        assert_eq!(cfg.bar.layout, Layout::Pack);
+        let kinds: Vec<&str> = cfg.modules.iter().map(|m| m.kind.as_str()).collect();
+        assert_eq!(kinds, ["appmenu", "clock"]);
+        assert_eq!(cfg.modules[0].align, Align::Start, "menu packs left");
+        assert_eq!(cfg.modules[1].align, Align::End, "clock packs right");
     }
 }
