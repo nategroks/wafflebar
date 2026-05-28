@@ -33,11 +33,13 @@ pub fn is_open() -> bool {
 
 /// Close the open dropdown, if any. Idempotent; safe to call when nothing is open.
 pub fn close_open() {
-    OPEN.with(|o| {
-        if let Some(win) = o.borrow_mut().take().as_ref().and_then(WeakRef::upgrade) {
-            win.destroy();
-        }
-    });
+    // Take the registry slot and *drop the borrow* before destroying: `destroy()` synchronously
+    // fires the window's `connect_destroy`, which re-borrows OPEN — holding the borrow across it
+    // would panic with "already borrowed".
+    let win = OPEN.with(|o| o.borrow_mut().take());
+    if let Some(win) = win.and_then(|w| w.upgrade()) {
+        win.destroy();
+    }
 }
 
 /// Turn `win` into a floating dropdown panel: an `Overlay` layer surface anchored at the top-left
