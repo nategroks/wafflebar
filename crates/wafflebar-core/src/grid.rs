@@ -9,7 +9,7 @@
 //! Keeping this logic here (GTK-free, unit-tested) means both the bar and the future GUI
 //! configurator share one source of truth for "is this layout valid?".
 
-use crate::config::{Align, Config};
+use crate::config::{Align, Config, Layout};
 use thiserror::Error;
 
 /// A validated, ready-to-attach module placement.
@@ -78,6 +78,28 @@ impl GridEngine {
         let cols = config.grid.columns;
         if rows == 0 || cols == 0 {
             return Err(GridError::EmptyGrid { rows, cols });
+        }
+
+        // Pack layout (single-row) groups modules by `align` and does not place them on the track,
+        // so `cell` is meaningless — produce placements in declaration order without validating
+        // bounds/overlap/spans. (A `rows > 1` config always uses the grid path, even under `pack`,
+        // so it still validates.) This is why a stray/out-of-bounds `cell` never breaks a pack bar.
+        if config.bar.layout == Layout::Pack && rows <= 1 {
+            let placements = config
+                .modules
+                .iter()
+                .enumerate()
+                .map(|(index, m)| Placement {
+                    kind: m.kind.clone(),
+                    col: index as u32,
+                    row: 0,
+                    colspan: 1,
+                    rowspan: 1,
+                    index,
+                    align: m.align,
+                })
+                .collect();
+            return Ok(GridEngine { rows, cols, placements });
         }
 
         // Occupancy map: which module index (if any) owns each cell.
@@ -192,6 +214,8 @@ mod tests {
     #[test]
     fn detects_out_of_bounds() {
         let c = cfg(r#"
+            [bar]
+            layout = "grid"
             [grid]
             rows = 1
             columns = 2
@@ -204,8 +228,27 @@ mod tests {
     }
 
     #[test]
+    fn pack_layout_ignores_invalid_cells() {
+        // Pack mode doesn't place on the track, so an out-of-bounds cell is not an error — the
+        // module just joins its align-group. (This is the default layout.)
+        let c = cfg(r#"
+            [grid]
+            rows = 1
+            columns = 2
+            [[modules]]
+            type = "clock"
+            cell = { row = 0, col = 99, colspan = 5 }
+        "#);
+        let g = GridEngine::build(&c).expect("pack ignores cell bounds");
+        assert_eq!(g.placements.len(), 1);
+        assert_eq!(g.placements[0].kind, "clock");
+    }
+
+    #[test]
     fn detects_overlap() {
         let c = cfg(r#"
+            [bar]
+            layout = "grid"
             [grid]
             rows = 1
             columns = 3
@@ -232,6 +275,8 @@ mod tests {
     #[test]
     fn rejects_zero_span() {
         let c = cfg(r#"
+            [bar]
+            layout = "grid"
             [grid]
             rows = 1
             columns = 2
