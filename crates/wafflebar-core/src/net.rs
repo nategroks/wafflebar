@@ -14,8 +14,11 @@ use serde::{Deserialize, Serialize};
 pub enum NetworkState {
     /// No primary connection (NM up but nothing connected).
     Disconnected,
-    /// A wired (or otherwise non-wireless) primary connection.
-    Wired { name: String },
-    /// A wireless primary connection. `strength` is 0..=100 (NM `AccessPoint.Strength`).
-    Wireless { name: String, strength: u8 },
+    /// A wired (or otherwise non-wireless) primary connection. `interface` is the kernel device name
+    /// (`eth0`/`enp…`, as in `ifconfig`/`ip`); `rx_bps`/`tx_bps` are the current down/up throughput in
+    /// **bits per second** (sampled from `/sys/class/net/<iface>/statistics`).
+    Wired { interface: String, rx_bps: u64, tx_bps: u64 },
+    /// A wireless primary connection. `interface` is the kernel device name (`wlan0`/`wlp…`),
+    /// `strength` is 0..=100 (NM `AccessPoint.Strength`), `rx_bps`/`tx_bps` as above.
+    Wireless { interface: String, strength: u8, rx_bps: u64, tx_bps: u64 },
 }

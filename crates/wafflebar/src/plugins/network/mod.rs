@@ -34,7 +34,10 @@ pub struct Network {
 #[derive(Clone, PartialEq, Eq)]
 struct Display {
     icon: &'static str,
-    label: String,
+    /// Kernel interface name (`eth0`/`wlan0`); empty when disconnected. Truncated at render.
+    interface: String,
+    /// The throughput readout (`↓12.3 ↑1.2`) or `offline`. Changes each active tick → re-renders.
+    rate: String,
 }
 
 impl Network {
@@ -73,17 +76,25 @@ fn derive(state: &NetworkState) -> Display {
     match state {
         NetworkState::Disconnected => Display {
             icon: "wb-net-offline-symbolic",
-            label: "offline".to_string(),
+            interface: String::new(),
+            rate: "offline".to_string(),
         },
-        NetworkState::Wired { name } => Display {
+        NetworkState::Wired { interface, rx_bps, tx_bps } => Display {
             icon: "wb-net-wired-symbolic",
-            label: name.clone(),
+            interface: interface.clone(),
+            rate: rate_label(*rx_bps, *tx_bps),
         },
-        NetworkState::Wireless { name, strength } => Display {
+        NetworkState::Wireless { interface, strength, rx_bps, tx_bps } => Display {
             icon: wifi_icon(*strength),
-            label: name.clone(),
+            interface: interface.clone(),
+            rate: rate_label(*rx_bps, *tx_bps),
         },
     }
+}
+
+/// Down/up throughput as `↓<rx> ↑<tx>` in Mbps (one decimal). Bits/s → Mbps = /1e6.
+fn rate_label(rx_bps: u64, tx_bps: u64) -> String {
+    format!("↓{:.1} ↑{:.1}", rx_bps as f64 / 1e6, tx_bps as f64 / 1e6)
 }
 
 impl Plugin for Network {
@@ -99,10 +110,17 @@ impl Plugin for Network {
         let Some(d) = &self.display else {
             return View::Empty; // NM absent / no state yet — render nothing, not a dead button
         };
+        // `eth0 ↓12.3 ↑1.2` when connected; just the rate ("offline") otherwise. Truncation applies
+        // to the interface name only (kept short), never the throughput.
+        let label = if d.interface.is_empty() {
+            d.rate.clone()
+        } else {
+            format!("{} {}", self.truncate(&d.interface), d.rate)
+        };
         View::row(
             vec![
                 View::icon(d.icon, 16).with_class("net-icon"),
-                View::label(self.truncate(&d.label)).with_class("net-label"),
+                View::label(label).with_class("net-label"),
             ],
             4,
         )
@@ -147,17 +165,32 @@ impl Plugin for Network {
 mod tests {
     use super::*;
 
-    fn wireless(name: &str, strength: u8) -> Event {
-        Event::Network(NetworkState::Wireless { name: name.into(), strength })
+    fn wireless(iface: &str, strength: u8) -> Event {
+        Event::Network(NetworkState::Wireless { interface: iface.into(), strength, rx_bps: 0, tx_bps: 0 })
+    }
+    fn wired(iface: &str, rx_bps: u64, tx_bps: u64) -> Event {
+        Event::Network(NetworkState::Wired { interface: iface.into(), rx_bps, tx_bps })
     }
 
     #[test]
     fn first_event_paints_then_identical_is_noop() {
         let mut n = Network::new(0);
-        assert!(n.on_event(&Event::Network(NetworkState::Wired { name: "eth0".into() })).dirty);
-        assert!(!n
-            .on_event(&Event::Network(NetworkState::Wired { name: "eth0".into() }))
-            .dirty);
+        assert!(n.on_event(&wired("eth0", 0, 0)).dirty);
+        assert!(!n.on_event(&wired("eth0", 0, 0)).dirty);
+    }
+
+    #[test]
+    fn throughput_change_dirties_and_formats_mbps() {
+        let mut n = Network::new(0);
+        n.on_event(&wired("eth0", 0, 0));
+        assert!(n.on_event(&wired("eth0", 12_300_000, 1_200_000)).dirty, "new rate repaints");
+        match n.view() {
+            View::Button { child, .. } => {
+                let View::Row { children, .. } = *child else { panic!("row") };
+                assert!(matches!(&children[1], View::Label { text, .. } if text == "eth0 ↓12.3 ↑1.2"));
+            }
+            _ => panic!("expected button"),
+        }
     }
 
     #[test]
@@ -179,7 +212,7 @@ mod tests {
     #[test]
     fn state_transitions_dirty_and_change_the_view() {
         let mut n = Network::new(0);
-        n.on_event(&Event::Network(NetworkState::Wired { name: "eth0".into() }));
+        n.on_event(&wired("eth0", 0, 0));
         assert!(n.on_event(&Event::Network(NetworkState::Disconnected)).dirty);
         match n.view() {
             View::Button { child, .. } => {
@@ -196,27 +229,24 @@ mod tests {
     }
 
     #[test]
-    fn long_name_truncates_at_max_chars() {
+    fn long_interface_truncates_but_throughput_is_kept() {
+        // Truncation applies to the interface name only — never the throughput readout.
         let mut n = Network::new(5);
-        n.on_event(&Event::Network(NetworkState::Wired {
-            name: "Wired connection 1".into(),
-        }));
-        match n.view() {
-            View::Button { child, .. } => {
-                let View::Row { children, .. } = *child else { panic!("row") };
-                assert!(matches!(&children[1], View::Label { text, .. } if text == "Wire…"));
-            }
-            _ => panic!("expected button"),
-        }
-        // Reconfigure to unlimited re-renders the full name from the stored display.
+        n.on_event(&wired("enp0s31f6", 0, 0));
+        let label_text = |n: &Network| match n.view() {
+            View::Button { child, .. } => match *child {
+                View::Row { children, .. } => match &children[1] {
+                    View::Label { text, .. } => text.clone(),
+                    _ => panic!("label"),
+                },
+                _ => panic!("row"),
+            },
+            _ => panic!("button"),
+        };
+        assert_eq!(label_text(&n), "enp0… ↓0.0 ↑0.0", "interface truncated, rate intact");
+        // Reconfigure to unlimited re-renders the full interface from the stored display.
         n.configure(&crate::plugins::test_module_config(&[("max_chars", toml::Value::from(0))]));
-        match n.view() {
-            View::Button { child, .. } => {
-                let View::Row { children, .. } = *child else { panic!("row") };
-                assert!(matches!(&children[1], View::Label { text, .. } if text == "Wired connection 1"));
-            }
-            _ => panic!("expected button"),
-        }
+        assert_eq!(label_text(&n), "enp0s31f6 ↓0.0 ↑0.0");
     }
 
     #[test]
