@@ -13,14 +13,16 @@
 //! application picker). Adding/removing a *module* reopens the window (the left list changes);
 //! editing a module's *options* rebuilds only the form pane.
 
+use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use gtk4::glib;
 use gtk4::prelude::*;
 use gtk4::{
-    gdk, Align, Button, DragSource, DropDown, DropTarget, Entry, EventControllerFocus, Image, Label,
-    ListBox, ListBoxRow, Orientation, ScrolledWindow, SearchEntry, SpinButton, Switch, Window,
+    gdk, Align, Button, CheckButton, DragSource, DropDown, DropTarget, Entry, EventControllerFocus,
+    Image, Label, ListBox, ListBoxRow, Orientation, ScrolledWindow, SearchEntry, SpinButton, Switch,
+    Window,
 };
 use tracing::warn;
 
@@ -95,12 +97,28 @@ pub fn open(config_path: &Path) {
         position: config.bar.position,
     };
 
-    // Left: target list (Bar + each module) over an "Add Item" button.
+    // Left: target list (Bar + each module) over Add / Remove-selected buttons.
     let list = ListBox::new();
     list.set_width_request(190);
     list.append(&list_row("Bar  ·  position, size, theme"));
+    // Per-module checkboxes for multi-select removal — independent of the single-select form
+    // navigation (clicking a row's label still drives the form; the checkbox only marks for delete).
+    let checks: Rc<RefCell<Vec<CheckButton>>> = Rc::new(RefCell::new(Vec::new()));
     for (mi, m) in config.modules.iter().enumerate() {
-        let row = list_row(&format!("⠿  {}  ·  cell ({}, {})", m.kind, m.cell.row, m.cell.col));
+        let check = CheckButton::new();
+        check.set_valign(Align::Center);
+        let label = Label::new(Some(&format!("⠿  {}  ·  cell ({}, {})", m.kind, m.cell.row, m.cell.col)));
+        label.set_xalign(0.0);
+        let hbox = gtk4::Box::new(Orientation::Horizontal, 6);
+        hbox.set_margin_top(6);
+        hbox.set_margin_bottom(6);
+        hbox.set_margin_start(8);
+        hbox.set_margin_end(8);
+        hbox.append(&check);
+        hbox.append(&label);
+        let row = ListBoxRow::new();
+        row.set_child(Some(&hbox));
+        checks.borrow_mut().push(check);
         // Drag-to-reorder (P5): the row carries its module index; dropping it on another module row
         // rewrites the `[[modules]]` order in the TOML, which the watcher reloads. The Bar row above
         // has no source/target, so it's neither draggable nor a drop site.
@@ -145,6 +163,26 @@ pub fn open(config_path: &Path) {
         move |_| open_add_items(&ctx)
     });
 
+    let remove_btn = Button::with_label("🗑  Remove selected");
+    remove_btn.add_css_class("destructive-action");
+    remove_btn.connect_clicked({
+        let (ctx, checks) = (ctx.clone(), checks.clone());
+        move |_| {
+            let idxs: Vec<usize> = checks
+                .borrow()
+                .iter()
+                .enumerate()
+                .filter(|(_, c)| c.is_active())
+                .map(|(i, _)| i)
+                .collect();
+            if idxs.is_empty() {
+                return;
+            }
+            remove_modules(&ctx.path, &idxs);
+            ctx.reopen(); // the module list changed — rebuild the window
+        }
+    });
+
     // Reserve the list's width on the ScrolledWindow itself (a scroll wrapper doesn't propagate its
     // child's width request) + drop horizontal scroll, so the hexpanding form pane can't overlap it.
     let list_scroll = ScrolledWindow::builder().child(&list).vexpand(true).build();
@@ -154,6 +192,7 @@ pub fn open(config_path: &Path) {
     let left = gtk4::Box::new(Orientation::Vertical, 0);
     left.append(&list_scroll);
     left.append(&add_btn);
+    left.append(&remove_btn);
 
     let split = gtk4::Box::new(Orientation::Horizontal, 0);
     split.set_vexpand(true);
@@ -760,6 +799,27 @@ fn move_module(path: &Path, from: usize, to: usize) {
     });
 }
 
+/// Remove several `[[modules]]` entries in one write (multi-select removal). Removes in descending
+/// index order so earlier indices stay valid; de-duped; out-of-range indices skipped.
+fn remove_modules(path: &Path, indices: &[usize]) {
+    let mut idxs: Vec<usize> = indices.to_vec();
+    idxs.sort_unstable();
+    idxs.dedup();
+    edit_doc(path, |doc| {
+        let Some(aot) = doc.get_mut("modules").and_then(|m| m.as_array_of_tables_mut()) else {
+            return false;
+        };
+        let mut removed = false;
+        for &i in idxs.iter().rev() {
+            if i < aot.len() {
+                aot.remove(i);
+                removed = true;
+            }
+        }
+        removed
+    });
+}
+
 /// Remove the i-th `[[modules]]` entry.
 fn remove_module(path: &Path, i: usize) {
     edit_doc(path, |doc| match doc.get_mut("modules").and_then(|m| m.as_array_of_tables_mut()) {
@@ -860,6 +920,22 @@ mod tests {
         let cfg = Config::parse(&std::fs::read_to_string(&p).unwrap()).unwrap();
         assert_eq!(cfg.modules.len(), 1);
         assert_eq!(cfg.modules[0].kind, "launcher");
+        std::fs::remove_file(&p).ok();
+    }
+
+    #[test]
+    fn remove_modules_drops_several_at_once() {
+        // CFG = [clock, launcher]. Removing both (any order) → empty; descending-order safe.
+        let p = tmp("rmm");
+        remove_modules(&p, &[1, 0]);
+        assert_eq!(Config::parse(&std::fs::read_to_string(&p).unwrap()).unwrap().modules.len(), 0);
+        std::fs::remove_file(&p).ok();
+        // Removing just index 1 leaves clock; out-of-range/dup indices are ignored.
+        let p = tmp("rmm2");
+        remove_modules(&p, &[1, 1, 9]);
+        let cfg = Config::parse(&std::fs::read_to_string(&p).unwrap()).unwrap();
+        assert_eq!(cfg.modules.len(), 1);
+        assert_eq!(cfg.modules[0].kind, "clock");
         std::fs::remove_file(&p).ok();
     }
 
