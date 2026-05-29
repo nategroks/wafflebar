@@ -23,6 +23,10 @@ schema = 1     # required-ish; defaults to the current version if omitted
 | `height` | integer | `26` | bar thickness in px (also the layer-shell exclusive zone) |
 | `icon_size` | integer | `0` | icon pixel size for bar glyphs; `0` auto-derives from `height` so icons track the bar's thickness, a non-zero value pins an explicit size |
 | `spacing` | integer | `0` | extra px between adjacent modules |
+| `length_percent` | integer | `100` | bar length as a % (1–100) of the monitor width; `<100` makes a shorter floating panel |
+| `alignment` | `"start"` \| `"center"` \| `"end"` | `"center"` | where a shorter-than-full bar sits along its edge (ignored at `length_percent = 100`) |
+| `reserve_space` | bool | `true` | reserve screen space (strut) so tiled windows avoid the bar; `false` lets windows extend under it |
+| `keep_below` | bool | `false` | keep the bar below normal windows (layer `Bottom`) instead of above (`Top`) |
 | `theme` | string | _(built-in Nord)_ | path to a GTK4 CSS file |
 
 ### `layout` — pack vs grid

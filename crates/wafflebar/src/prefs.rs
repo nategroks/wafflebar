@@ -657,6 +657,15 @@ fn bar_config_schema() -> Vec<ConfigField> {
             ],
             "primary",
         ),
+        ConfigField::int("length_percent", "Length (% of monitor width)", 1, 100, 100),
+        ConfigField::choice(
+            "alignment",
+            "Alignment (when shorter than full)",
+            &[("start", "Start"), ("center", "Center"), ("end", "End")],
+            "center",
+        ),
+        ConfigField::bool("reserve_space", "Reserve screen space (strut)", true),
+        ConfigField::bool("keep_below", "Keep below windows", false),
         ConfigField::text("theme", "Theme CSS path (blank = built-in Nord)", ""),
     ]
 }
@@ -670,6 +679,7 @@ fn current_str(config: &Config, target: Target, key: &str) -> Option<String> {
         Target::Bar => match key {
             "position" => Some(position_str(config.bar.position).to_string()),
             "monitor" => Some(config.bar.monitor.clone()),
+            "alignment" => Some(alignment_str(config.bar.alignment).to_string()),
             "theme" => config.bar.theme.clone(),
             _ => None,
         },
@@ -682,6 +692,7 @@ fn current_int(config: &Config, target: Target, key: &str) -> Option<i64> {
         Target::Bar => match key {
             "height" => Some(config.bar.height as i64),
             "icon_size" => Some(config.bar.icon_size as i64),
+            "length_percent" => Some(config.bar.length_percent as i64),
             _ => None,
         },
     }
@@ -690,7 +701,20 @@ fn current_int(config: &Config, target: Target, key: &str) -> Option<i64> {
 fn current_bool(config: &Config, target: Target, key: &str) -> Option<bool> {
     match target {
         Target::Module(i) => config.modules.get(i)?.opt_bool(key),
-        Target::Bar => None, // no boolean bar fields yet
+        Target::Bar => match key {
+            "reserve_space" => Some(config.bar.reserve_space),
+            "keep_below" => Some(config.bar.keep_below),
+            _ => None,
+        },
+    }
+}
+
+fn alignment_str(a: wafflebar_core::Alignment) -> &'static str {
+    use wafflebar_core::Alignment;
+    match a {
+        Alignment::Start => "start",
+        Alignment::Center => "center",
+        Alignment::End => "end",
     }
 }
 

@@ -130,13 +130,16 @@ fn present_bar(
         .default_height(config.bar.height as i32)
         .build();
 
+    // Monitor width drives `length_percent` (a shorter-than-full bar); `None` (unknown monitor) →
+    // apply_bar_layout falls back to full width.
+    let monitor_width = monitor.map(|m| m.geometry().width());
+
     window.init_layer_shell();
-    window.set_layer(Layer::Top);
     window.set_namespace(Some("wafflebar"));
     if let Some(mon) = monitor {
         window.set_monitor(Some(mon));
     }
-    apply_bar_layout(&window, &config.bar);
+    apply_bar_layout(&window, &config.bar, monitor_width); // sets the layer (Top/Bottom) too
     window.set_widget_name("wafflebar");
 
     // Right-click empty bar space → preferences window (F3). Clicks on plugin buttons are consumed
@@ -193,6 +196,7 @@ fn present_bar(
             let host = host.clone();
             let timers = timers.clone();
             let backends = backends.clone();
+            // monitor_width is Copy — the move closure captures it directly.
             Rc::new(move |new_config: &Config| {
                 let engine = match GridEngine::build(new_config) {
                     Ok(e) => e,
@@ -219,7 +223,7 @@ fn present_bar(
                     host.subscribes(&Topic::Network),
                     host.subscribes(&Topic::Tray),
                 );
-                apply_bar_layout(&window, &new_config.bar);
+                apply_bar_layout(&window, &new_config.bar, monitor_width);
                 host.set_position(new_config.bar.position);
                 host.set_icon_size(new_config.bar.effective_icon_size());
 
@@ -275,14 +279,48 @@ fn attach_clock_calendar(
 
 /// Apply the `[bar]` layer-shell layout (edge anchors + exclusive zone + height). gtk4-layer-shell
 /// reconfigures a *mapped* surface, so this works live for a reposition (F2c) — no window recreate.
-fn apply_bar_layout(window: &ApplicationWindow, bar: &wafflebar_core::BarConfig) {
+fn apply_bar_layout(
+    window: &ApplicationWindow,
+    bar: &wafflebar_core::BarConfig,
+    monitor_width: Option<i32>,
+) {
+    use wafflebar_core::Alignment;
+
+    // Layer: below normal windows (Bottom) or above (Top, default).
+    window.set_layer(if bar.keep_below { Layer::Bottom } else { Layer::Top });
+
+    // Vertical edge.
     let top = bar.position == Position::Top;
-    window.set_anchor(Edge::Left, true);
-    window.set_anchor(Edge::Right, true);
     window.set_anchor(Edge::Top, top);
     window.set_anchor(Edge::Bottom, !top);
+
+    // Horizontal extent. Full width = anchor both edges (compositor sizes it). A shorter bar anchors
+    // to one side (or neither, for centered) and is sized by its own width request. Falls back to
+    // full width if we don't know the monitor width.
+    let pct = bar.length_percent.clamp(1, 100);
+    match monitor_width {
+        Some(w) if pct < 100 => {
+            window.set_anchor(Edge::Left, bar.alignment == Alignment::Start);
+            window.set_anchor(Edge::Right, bar.alignment == Alignment::End);
+            let width = (i64::from(w) * i64::from(pct) / 100).max(1) as i32;
+            window.set_size_request(width, bar.height as i32);
+            window.set_default_width(width);
+        }
+        _ => {
+            window.set_anchor(Edge::Left, true);
+            window.set_anchor(Edge::Right, true);
+            window.set_size_request(-1, bar.height as i32);
+        }
+    }
+
     window.set_default_height(bar.height as i32);
-    window.auto_exclusive_zone_enable();
+
+    // Reserve screen space (strut) so tiled windows avoid the bar, or not.
+    if bar.reserve_space {
+        window.auto_exclusive_zone_enable();
+    } else {
+        window.set_exclusive_zone(0);
+    }
 }
 
 /// Build the grid widget and one host-owned container per placement, instantiating each module's

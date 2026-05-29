@@ -77,9 +77,35 @@ pub struct BarConfig {
     /// bar's thickness; a non-zero value pins an explicit size. See [`BarConfig::effective_icon_size`].
     #[serde(default)]
     pub icon_size: u32,
+    /// Bar length as a percentage (1..=100) of the monitor's width. `100` (default) spans the full
+    /// edge; less makes a shorter floating panel placed by [`alignment`](Self::alignment).
+    #[serde(default = "default_length_percent")]
+    pub length_percent: u32,
+    /// Where a shorter-than-full bar sits along its edge: `start` / `center` (default) / `end`.
+    /// Ignored at `length_percent = 100`.
+    #[serde(default)]
+    pub alignment: Alignment,
+    /// Whether to reserve screen space (a layer-shell exclusive zone / strut) so tiled windows don't
+    /// sit under the bar. `true` (default) reserves; `false` lets windows extend under it.
+    #[serde(default = "default_true")]
+    pub reserve_space: bool,
+    /// Keep the bar *below* normal windows (layer-shell `Bottom`) instead of above them (`Top`,
+    /// default). Pairs naturally with `reserve_space = false`.
+    #[serde(default)]
+    pub keep_below: bool,
     /// Optional path to a GTK CSS theme file.
     #[serde(default)]
     pub theme: Option<String>,
+}
+
+/// Horizontal placement of a shorter-than-full bar along its edge.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum Alignment {
+    Start,
+    #[default]
+    Center,
+    End,
 }
 
 impl BarConfig {
@@ -104,9 +130,20 @@ impl Default for BarConfig {
             spacing: 0,
             height: default_height(),
             icon_size: 0,
+            length_percent: default_length_percent(),
+            alignment: Alignment::default(),
+            reserve_space: true,
+            keep_below: false,
             theme: None,
         }
     }
+}
+
+fn default_length_percent() -> u32 {
+    100
+}
+fn default_true() -> bool {
+    true
 }
 
 fn default_monitor() -> String {
