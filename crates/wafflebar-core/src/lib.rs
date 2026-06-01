@@ -18,9 +18,11 @@ pub mod audio;
 pub mod bluetooth;
 pub mod config;
 pub mod cpu;
+pub mod disk;
 pub mod fake;
 pub mod freedesktop;
 pub mod grid;
+pub mod interface;
 pub mod memory;
 pub mod menu;
 pub mod net;
@@ -31,6 +33,7 @@ pub mod reconcile;
 pub mod schema;
 pub mod tray;
 pub mod view;
+pub mod weather;
 pub mod wm;
 
 pub use config::{
@@ -40,8 +43,10 @@ pub use config::{
 pub use audio::{VolumeCommand, VolumeEvent, VOLUME_NORM};
 pub use bluetooth::{BluetoothCommand, BluetoothState, BtDevice};
 pub use cpu::CpuState;
+pub use disk::DiskState;
 pub use freedesktop::{application_dirs, list_applications, DesktopAction, DesktopApp, Launch};
 pub use grid::{GridEngine, GridError, Placement};
+pub use interface::{InterfaceLink, InterfaceState};
 pub use memory::MemoryState;
 pub use menu::categorized;
 pub use net::NetworkState;
@@ -52,4 +57,5 @@ pub use reconcile::{diff_children, ChildPatch, ListPatch};
 pub use schema::{ConfigField, FieldKind};
 pub use tray::{TrayCommand, TrayItem, TrayStatus};
 pub use view::{ActionId, MenuItem, Pixmap, SeparatorStyle, View};
+pub use weather::{WeatherReading, WeatherState};
 pub use wm::{Output, Tag, TagState, Window, WindowId, WindowManager, WmCommand, WmEvent};

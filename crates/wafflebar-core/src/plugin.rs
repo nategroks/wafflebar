@@ -10,9 +10,12 @@ use crate::audio::{VolumeCommand, VolumeEvent};
 use crate::bluetooth::{BluetoothCommand, BluetoothState};
 use crate::config::ModuleConfig;
 use crate::cpu::CpuState;
+use crate::disk::DiskState;
 use crate::freedesktop::Launch;
+use crate::interface::InterfaceState;
 use crate::memory::MemoryState;
 use crate::net::NetworkState;
+use crate::weather::WeatherState;
 use crate::schema::ConfigField;
 use crate::tray::{TrayCommand, TrayItem};
 use crate::view::{ActionId, View};
@@ -44,10 +47,20 @@ pub enum Topic {
     /// Bluetooth (adapter power + paired-device connection) changes. The host starts the BlueZ
     /// backend only if some plugin subscribes to this.
     Bluetooth,
+    /// Per-interface link state from `/sys/class/net/*` — name-keyed, sibling to `Network` (which
+    /// follows NM's primary). The host starts the interface backend only if some plugin subscribes.
+    Interface,
+    /// Filesystem usage from statvfs() on a per-plugin-configured mount point. Like Memory, this
+    /// is a polling backend; period is fixed at 30 s in v1 (disk usage doesn't change at 1 Hz).
+    Disk,
+    /// Weather readings from a remote API (Open-Meteo). Period is fixed at 10 min in v1.
+    Weather,
 }
 
 /// An event delivered to a subscribed module.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+// Eq dropped because WeatherState carries an f64 — PartialEq still derives, which is what every
+// test uses; we never put Event in a hash set.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Event {
     /// A window-manager state change.
     Wm(crate::wm::WmEvent),
@@ -65,6 +78,14 @@ pub enum Event {
     Tray(Vec<TrayItem>),
     /// The current Bluetooth state from the host's BlueZ backend (full snapshot on any change).
     Bluetooth(BluetoothState),
+    /// Per-interface link state snapshot from the host's `/sys/class/net` polling backend.
+    Interface(InterfaceState),
+    /// A statvfs() snapshot of one mount point from the host's disk polling backend. The state
+    /// carries the path so a plugin with multiple instances filters by its own configured mount.
+    Disk { path: String, state: DiskState },
+    /// A weather reading from the host's polling backend. The state may have `reading: None` while
+    /// the first fetch hasn't returned (or after a network error); the plugin renders Empty then.
+    Weather(WeatherState),
 }
 
 /// A module's response to an event or action: whether its view changed, plus any side effects

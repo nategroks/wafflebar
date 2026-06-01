@@ -4,11 +4,14 @@
 //! Unknown types fall back to a [`Placeholder`] module that renders a dim label — *not* a
 //! special code path, just another `Plugin`.
 
+pub mod actions;
 pub mod appmenu;
 pub mod bluetooth;
 pub mod clock;
 pub mod cpu;
+pub mod disk;
 pub mod dwl;
+pub mod interface;
 pub mod launcher;
 pub mod memory;
 pub mod network;
@@ -17,6 +20,7 @@ pub mod showdesktop;
 pub mod statustray;
 pub mod tasklist;
 pub mod volume;
+pub mod weather;
 
 use wafflebar_core::{ActionId, ConfigField, Event, ModuleConfig, Plugin, Reaction, Topic, View};
 
@@ -30,6 +34,7 @@ pub struct Caps {
 /// Construct a module for `kind`, bound to `output` (the bar's monitor), `cfg`, and backend `caps`.
 pub fn build(kind: &str, output: &str, cfg: &ModuleConfig, caps: &Caps) -> Box<dyn Plugin> {
     match kind {
+        "actions" => Box::new(actions::Actions::new(cfg)),
         "appmenu" => Box::new(appmenu::AppMenu::new(cfg)),
         "clock" => Box::new(clock::Clock::new(cfg)),
         "tags" => Box::new(dwl::tags::Tags::new(output)),
@@ -40,10 +45,13 @@ pub fn build(kind: &str, output: &str, cfg: &ModuleConfig, caps: &Caps) -> Box<d
         "showdesktop" => Box::new(showdesktop::ShowDesktop::new(caps)),
         "volume" => Box::new(volume::Volume::new()),
         "network" => Box::new(network::Network::new(network::read_max_chars(cfg))),
+        "interface" => Box::new(interface::Interface::new(interface::read_interface(cfg))),
+        "disk" => Box::new(disk::Disk::new(disk::read_path(cfg))),
         "memory" => Box::new(memory::Memory::new()),
         "cpu" => Box::new(cpu::Cpu::new()),
         "statustray" => Box::new(statustray::StatusTray::new()),
         "bluetooth" => Box::new(bluetooth::Bluetooth::new()),
+        "weather" => Box::new(weather::Weather::new()),
         other => Box::new(Placeholder::new(other)),
     }
 }
@@ -85,8 +93,12 @@ pub fn catalog() -> Vec<PluginInfo> {
         info("cpu", "CPU", "Processor load.", "utilities-system-monitor-symbolic", false),
         info("volume", "Volume", "Audio volume. Starting its backend needs a restart.", "audio-volume-medium-symbolic", false),
         info("network", "Network", "Connection status. Starting its backend needs a restart.", "network-wireless-symbolic", false),
+        info("interface", "Interface", "Throughput for a specific kernel interface (e.g. wlan0). Needs a restart on first add.", "network-wired-symbolic", false),
+        info("disk", "Disk", "Filesystem usage percent for a mount point (default /). Needs a restart on first add.", "drive-harddisk-symbolic", false),
+        info("weather", "Weather", "Temperature + condition from Open-Meteo (free, no key). Configure latitude / longitude / units.", "weather-clear-symbolic", true),
         info("statustray", "System tray", "Status-notifier icons from running apps.", "preferences-system-notifications-symbolic", true),
         info("bluetooth", "Bluetooth", "Adapter power + paired devices. Starting its backend needs a restart.", "bluetooth-symbolic", true),
+        info("actions", "Session actions", "Lock / Logout / Suspend / Hibernate / Reboot / Shut Down via loginctl.", "system-shutdown-symbolic", false),
     ]
 }
 

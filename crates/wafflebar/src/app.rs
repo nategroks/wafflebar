@@ -19,11 +19,14 @@ use wafflebar_core::{
 use crate::event_loop;
 use crate::plugins;
 use crate::plugins::cpu::backend::{CpuBackend, ProcStatBackend};
+use crate::plugins::disk::backend::{DiskBackend, StatvfsBackend};
+use crate::plugins::interface::backend::{InterfaceBackend, SysNetBackend};
 use crate::plugins::memory::backend::{MemoryBackend, ProcMemBackend};
 use crate::plugins::bluetooth::backend::BtBackend;
 use crate::plugins::network::backend::{NetworkBackend, NmBackend};
 use crate::plugins::statustray::backend::SniBackend;
 use crate::plugins::volume::backend::PulseBackend;
+use crate::plugins::weather::backend::{OpenMeteoBackend, WeatherBackend};
 use crate::render::{Host, PluginSlot};
 use crate::wm::{connect_backend, WmConnection};
 
@@ -759,6 +762,14 @@ struct TimerSet {
     memory: Option<glib::SourceId>,
     /// /proc/stat poller, present iff some module subscribes `Topic::Cpu`.
     cpu: Option<glib::SourceId>,
+    /// /sys/class/net poller, present iff some module subscribes `Topic::Interface`.
+    interface: Option<glib::SourceId>,
+    /// statvfs poller, present iff some module subscribes `Topic::Disk`. The set of paths is
+    /// determined at start time; an added/changed mount needs a structural reload to take effect.
+    disk: Option<glib::SourceId>,
+    /// Open-Meteo poller, present iff some module subscribes `Topic::Weather`. lat/lon/units are
+    /// captured from the first placed weather slot at start.
+    weather: Option<glib::SourceId>,
 }
 
 impl TimerSet {
@@ -775,7 +786,10 @@ impl TimerSet {
         let intervals: HashSet<u32> = host.timer_intervals().into_iter().collect();
         let want_memory = host.subscribes(&Topic::Memory);
         let want_cpu = host.subscribes(&Topic::Cpu);
-        self.reconcile_to(&intervals, want_memory, want_cpu, host, mem_secs);
+        let want_interface = host.subscribes(&Topic::Interface);
+        let want_disk = host.subscribes(&Topic::Disk);
+        let want_weather = host.subscribes(&Topic::Weather);
+        self.reconcile_to(&intervals, want_memory, want_cpu, want_interface, want_disk, want_weather, host, mem_secs);
     }
 
     /// The pure diff, split out so the leak-prone bookkeeping is testable without building real
@@ -786,6 +800,9 @@ impl TimerSet {
         intervals: &HashSet<u32>,
         want_memory: bool,
         want_cpu: bool,
+        want_interface: bool,
+        want_disk: bool,
+        want_weather: bool,
         host: &Rc<Host>,
         mem_secs: u64,
     ) {
@@ -849,6 +866,62 @@ impl TimerSet {
             }
             (false, true) => {
                 if let Some(id) = self.cpu.take() {
+                    id.remove();
+                }
+            }
+            _ => {}
+        }
+
+        // Interface poller: /sys/class/net/* every 1 s, emits per-interface throughput so the
+        // `interface` plugin can filter by name (e.g. show wlan0 alongside the eth0 primary).
+        match (want_interface, self.interface.is_some()) {
+            (true, false) => {
+                let host_weak = Rc::downgrade(host);
+                self.interface = Some(SysNetBackend.start(Box::new(move |state| {
+                    if let Some(h) = host_weak.upgrade() {
+                        h.deliver_event(&Event::Interface(state));
+                    }
+                })));
+            }
+            (false, true) => {
+                if let Some(id) = self.interface.take() {
+                    id.remove();
+                }
+            }
+            _ => {}
+        }
+
+        // Disk poller: discovers real-fs mount points from /proc/mounts, statvfs()'s each every 30s.
+        match (want_disk, self.disk.is_some()) {
+            (true, false) => {
+                let host_weak = Rc::downgrade(host);
+                self.disk = Some(StatvfsBackend.start(Box::new(move |path, state| {
+                    if let Some(h) = host_weak.upgrade() {
+                        h.deliver_event(&Event::Disk { path, state });
+                    }
+                })));
+            }
+            (false, true) => {
+                if let Some(id) = self.disk.take() {
+                    id.remove();
+                }
+            }
+            _ => {}
+        }
+
+        // Weather poller: Open-Meteo at 10-min cadence. Backend self-reads lat/lon/units from
+        // ~/.config/wafflebar/config.toml; the plugin reducer stays pure.
+        match (want_weather, self.weather.is_some()) {
+            (true, false) => {
+                let host_weak = Rc::downgrade(host);
+                self.weather = Some(OpenMeteoBackend.start(Box::new(move |state| {
+                    if let Some(h) = host_weak.upgrade() {
+                        h.deliver_event(&Event::Weather(state));
+                    }
+                })));
+            }
+            (false, true) => {
+                if let Some(id) = self.weather.take() {
                     id.remove();
                 }
             }
@@ -918,48 +991,48 @@ mod tests {
         let one = intervals(&[1]);
 
         // Empty bar → no timers.
-        t.reconcile_to(&none, false, false, &host, 5);
+        t.reconcile_to(&none, false, false, false, false, false, &host, 5);
         assert!(t.clock.is_empty() && t.memory.is_none() && t.cpu.is_none());
 
         // Add a memory module → its poller starts; clock/cpu still absent.
-        t.reconcile_to(&none, true, false, &host, 5);
+        t.reconcile_to(&none, true, false, false, false, false, &host, 5);
         assert!(t.memory.is_some(), "memory poller started on add");
         assert!(t.clock.is_empty() && t.cpu.is_none());
 
         // Remove it → poller torn down (SourceId removed, Option cleared).
-        t.reconcile_to(&none, false, false, &host, 5);
+        t.reconcile_to(&none, false, false, false, false, false, &host, 5);
         assert!(t.memory.is_none(), "memory poller removed on remove");
 
         // Add a clock → one interval-keyed tick timer.
-        t.reconcile_to(&one, false, false, &host, 5);
+        t.reconcile_to(&one, false, false, false, false, false, &host, 5);
         assert_eq!(t.clock.len(), 1, "one clock interval timer");
 
         // Change kind clock→cpu (slot's needs flip) → clock timer gone, cpu poller up.
-        t.reconcile_to(&none, false, true, &host, 5);
+        t.reconcile_to(&none, false, true, false, false, false, &host, 5);
         assert!(t.clock.is_empty(), "clock timer removed on kind change");
         assert!(t.cpu.is_some(), "cpu poller started on kind change");
 
         // Reorder doesn't change the desired set: reconcile is idempotent, all timers stay up with
         // no duplication.
-        t.reconcile_to(&one, true, true, &host, 5);
-        t.reconcile_to(&one, true, true, &host, 5); // reorder → identical needs
+        t.reconcile_to(&one, true, true, false, false, false, &host, 5);
+        t.reconcile_to(&one, true, true, false, false, false, &host, 5); // reorder → identical needs
         assert_eq!(t.clock.len(), 1);
         assert!(t.memory.is_some() && t.cpu.is_some(), "all timers up, none duplicated");
 
         // Distinct intervals each get a timer; re-reconciling the same set adds nothing.
         let ten = intervals(&[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
-        t.reconcile_to(&ten, true, true, &host, 5);
+        t.reconcile_to(&ten, true, true, false, false, false, &host, 5);
         assert_eq!(t.clock.len(), 10);
-        t.reconcile_to(&ten, true, true, &host, 5);
+        t.reconcile_to(&ten, true, true, false, false, false, &host, 5);
         assert_eq!(t.clock.len(), 10, "idempotent: no duplicate interval timers");
 
         // Leak stress: 10 add-all / remove-all cycles must return to the same resting state every
         // time, never accumulating sources.
         for _ in 0..10 {
-            t.reconcile_to(&one, true, true, &host, 5);
+            t.reconcile_to(&one, true, true, false, false, false, &host, 5);
             assert_eq!(t.clock.len(), 1);
             assert!(t.memory.is_some() && t.cpu.is_some());
-            t.reconcile_to(&none, false, false, &host, 5);
+            t.reconcile_to(&none, false, false, false, false, false, &host, 5);
             assert!(t.clock.is_empty() && t.memory.is_none() && t.cpu.is_none());
         }
     }

@@ -38,7 +38,13 @@ toml_edit = "0.22"
 async-channel = "2.5"
 # sway/i3 backend: the i3-ipc payload is JSON over a framed socket. serde derives the reply structs.
 serde = { workspace = true, features = ["derive"] }
+# Disk plugin: statvfs() syscall for filesystem usage. No std equivalent.
+libc = "0.2"
+# Weather plugin: sync HTTPS GET to api.open-meteo.com every ~10 min. ureq is the small choice.
+ureq = { version = "2.10", features = ["tls", "json"], default-features = false }
 serde_json = "1"
+# Weather backend also needs to read the user's TOML config to pick up lat/lon/units.
+toml.workspace = true
 # GTK + Wayland deps are added via `cargo add` (M1) so versions resolve compatibly.
 
 [dev-dependencies]
