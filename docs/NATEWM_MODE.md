@@ -11,12 +11,24 @@
 > grew an additive `closed(&self) -> bool` default-`false` method for the step-3 host
 > EOF-exit wiring.
 >
-> **Step 3 — host integration:** ⏳ deferred. Plug `SomeblocksIntake.fd()` into the GLib
-> main loop next to the existing WM fd; route `FeedEvent::Frame` to the right-side strip
-> plugins; wire SIGTERM/SIGINT to `cleanup()`; observe `WmConnection::closed()` after
-> each dispatch and exit (running cleanup) when the compositor goes away. Live-verify on
-> dwl via `dwl -s 'wafflebar --dwl-status-stdin'` with a `natewm-status` feeder writing
-> to the socket.
+> **Step 3a — two-clocks wiring + UTF-8 robustness:** ✅ landed
+> (commits `06c991d` + this commit). Both channels get their own
+> `event_loop::add_fd_watch_local` source at `G_PRIORITY_DEFAULT`, with
+> `// === Clock 1: WM fd. ===` and `// === Clock 2: someblocks feed fd. ===`
+> markers in `app.rs::present_bar`. Neither is tied to the GTK render tick. The
+> reducers' coalesce-latest means a slow renderer cannot back-pressure either
+> producer. UTF-8 fix-now: titles + block text lossy-decode to mojibake (U+FFFD)
+> rather than dropping the line. Core gained `Event::Feed(FeedEvent)` +
+> `Topic::Feed` (additive — existing match arms with wildcards unaffected).
+>
+> **Step 3b — frame rendering + signals + preset + live verify:** ⏳ deferred.
+> Build the `feedblocks` plugin (subscribes to `Topic::Feed`, renders the latest
+> frame's blocks as a horizontal row of CSS-themable labels); wire SIGTERM/SIGINT
+> to `SomeblocksIntake::cleanup()`; observe `WmConnection::closed()` after each
+> dispatch and exit (running cleanup) when the compositor goes away; ship
+> `themes/natewm-preset.toml`; capture a multi-monitor golden fixture from cage
+> with `WLR_WL_OUTPUTS=2` (or real heads); live-verify on dwl via
+> `dwl -s 'wafflebar --dwl-status-stdin'` with a `natewm-status` feeder.
 
 ## Five flags signed off (step-1 review)
 
