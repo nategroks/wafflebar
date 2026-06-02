@@ -236,6 +236,35 @@ fn empty_value_lines_register_as_field_updates() {
 }
 
 #[test]
+fn malformed_utf8_title_degrades_to_mojibake_not_panic() {
+    // Wayland clients are *supposed* to set titles as UTF-8, but nothing stops a misbehaving
+    // client emitting invalid bytes. The parser must NOT panic and must NOT silently drop the
+    // line — it must update the title (degraded to U+FFFD mojibake) so a stale prior title
+    // doesn't linger on the bar misleadingly.
+    let mut r = StatusReducer::new();
+    // Build "WL-1 title bad-\xFE\xFF-bytes\n" by bytes — \xFE and \xFF are invalid as UTF-8
+    // lead bytes, guaranteed to provoke a decoding error.
+    let mut line: Vec<u8> = b"WL-1 title bad-".to_vec();
+    line.extend_from_slice(&[0xFE, 0xFF]);
+    line.extend_from_slice(b"-bytes\n");
+    r.feed(&line);
+    let events = r.drain_events();
+    let title = events
+        .iter()
+        .find_map(|e| match e {
+            WmEvent::ActiveWindow { title, .. } => Some(title.clone()),
+            _ => None,
+        })
+        .expect("ActiveWindow expected — line must NOT have been dropped");
+    assert!(title.starts_with("bad-"), "title prefix preserved: {title:?}");
+    assert!(title.ends_with("-bytes"), "title suffix preserved: {title:?}");
+    assert!(
+        title.contains('\u{FFFD}'),
+        "mojibake replacement expected, got {title:?}"
+    );
+}
+
+#[test]
 fn malformed_line_is_silently_skipped() {
     // Forward-compat: an unknown field name or a malformed tags line shouldn't crash the bar
     // or poison subsequent valid lines.

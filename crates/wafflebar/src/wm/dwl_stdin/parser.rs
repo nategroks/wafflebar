@@ -70,9 +70,12 @@ impl StatusReducer {
     /// `feed` call (we `mem::take` the buffer so we can mutate `self` while iterating slices of
     /// it, then push the trailing partial line back).
     ///
-    /// Lines with invalid UTF-8 are dropped silently — dwl emits only ASCII/UTF-8 for field
-    /// names, and title/appid values are wayland strings (utf8). A mid-byte truncation can't
-    /// happen here because we only parse on `\n` boundaries.
+    /// **UTF-8 robustness:** decode happens *per-component* inside [`apply_line`]: the monitor
+    /// name and field name must be ASCII-clean (dwl emits exactly that — connector strings like
+    /// `WL-1` and labels like `title`); the value is decoded lossily because it includes
+    /// client-set window titles, where a misbehaving client can emit invalid bytes. A malformed
+    /// title degrades to mojibake (U+FFFD), never a bar-wide panic, and never a silently-dropped
+    /// state update on an otherwise valid line.
     pub fn feed(&mut self, bytes: &[u8]) {
         self.buf.extend_from_slice(bytes);
         let buf = std::mem::take(&mut self.buf);
@@ -80,9 +83,7 @@ impl StatusReducer {
         let mut last_terminator = 0;
         for i in 0..buf.len() {
             if buf[i] == b'\n' {
-                if let Ok(s) = std::str::from_utf8(&buf[start..i]) {
-                    self.apply_line(s);
-                }
+                self.apply_line(&buf[start..i]);
                 start = i + 1;
                 last_terminator = start;
             }
@@ -91,51 +92,68 @@ impl StatusReducer {
         self.buf.extend_from_slice(&buf[last_terminator..]);
     }
 
-    fn apply_line(&mut self, line: &str) {
-        // Split into <mon> <field> <value>. `splitn(3, ' ')` preserves spaces inside <value>
-        // (matters for titles like "gero@whatsit ~/code/natewm-asm/vendor/dwl" and layout
-        // symbols like "(@)" / "[]=").
-        let mut it = line.splitn(3, ' ');
-        let mon = match it.next() {
-            Some(s) if !s.is_empty() => s,
+    fn apply_line(&mut self, line: &[u8]) {
+        // Byte-level split on the first two spaces; the third component (value) keeps any
+        // remaining spaces verbatim — matters for titles like "gero@whatsit ~/code/…" and layout
+        // symbols like "(@)" / "[]=".
+        let mut it = line.splitn(3, |&b| b == b' ');
+        let mon_bytes = match it.next() {
+            Some(b) if !b.is_empty() => b,
             _ => return,
         };
-        let field = match it.next() {
-            Some(s) if !s.is_empty() => s,
+        let field_bytes = match it.next() {
+            Some(b) if !b.is_empty() => b,
             _ => return,
         };
-        let value = it.next().unwrap_or("");
+        let value_bytes = it.next().unwrap_or(&[]);
+
+        // Monitor + field must be valid UTF-8 (in practice ASCII). If not, the line is
+        // structurally bogus (dwl wouldn't emit it); drop without touching state.
+        let mon = match std::str::from_utf8(mon_bytes) {
+            Ok(s) => s,
+            Err(_) => return,
+        };
+        let field = match std::str::from_utf8(field_bytes) {
+            Ok(s) => s,
+            Err(_) => return,
+        };
+        // Value is whatever the wayland client set its title to. A spec-compliant client emits
+        // UTF-8; a misbehaving one emits bytes. Lossy-decode so the field update still applies
+        // (mojibake → renderer; better than the stale cached title showing for the rest of the
+        // session). `Cow<str>` avoids the allocation when the bytes are valid UTF-8 (the common
+        // case); we only materialize a `String` if we actually need to.
+        let value: std::borrow::Cow<'_, str> = String::from_utf8_lossy(value_bytes);
 
         let state = self.monitors.entry(mon.to_string()).or_default();
         let changed = match field {
             "title" => {
-                state.title = value.to_string();
+                state.title = value.into_owned();
                 true
             }
             "appid" => {
-                state.appid = value.to_string();
+                state.appid = value.into_owned();
                 true
             }
             "fullscreen" => {
-                state.fullscreen = parse_optional_bool(value);
+                state.fullscreen = parse_optional_bool(&value);
                 true
             }
             "floating" => {
-                state.floating = parse_optional_bool(value);
+                state.floating = parse_optional_bool(&value);
                 true
             }
             "selmon" => {
-                state.selmon = value == "1";
+                state.selmon = &*value == "1";
                 true
             }
-            "tags" => parse_tags(value)
+            "tags" => parse_tags(&value)
                 .map(|m| {
                     state.tags = m;
                     true
                 })
                 .unwrap_or(false),
             "layout" => {
-                state.layout = value.to_string();
+                state.layout = value.into_owned();
                 true
             }
             _ => false, // unknown field — silently skip (forward-compat with future dwl versions)

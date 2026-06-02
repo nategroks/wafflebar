@@ -229,12 +229,12 @@ impl SomeblocksIntake {
             }
 
             // Parse complete lines; coalesce-latest by overwriting `latest` each iteration.
+            // Block text is lossy-decoded — a misbehaving status producer emitting malformed
+            // bytes degrades the affected block to mojibake instead of crashing the bar.
             let mut last_terminator = 0;
             for i in 0..conn.buf.len() {
                 if conn.buf[i] == b'\n' {
-                    if let Ok(line) = std::str::from_utf8(&conn.buf[last_terminator..i]) {
-                        latest = Some(parse_line(line));
-                    }
+                    latest = Some(parse_line(&conn.buf[last_terminator..i]));
                     last_terminator = i + 1;
                 }
             }
@@ -259,8 +259,12 @@ impl Drop for SomeblocksIntake {
 /// Split a producer line into [`FeedBlock`]s. someblocks tradition: blocks separated by `" | "`,
 /// the producer owns ordering. Block names are synthesized positional (`b0`, `b1`, …); the
 /// renderer keys on position-stable order, not the name itself.
-fn parse_line(line: &str) -> FeedEvent {
-    let blocks = line
+///
+/// **UTF-8 robustness:** the line is decoded lossily (mojibake for bad bytes). A producer
+/// pipelining `sed` output or pulling from a file with mis-encoded text doesn't crash the bar.
+fn parse_line(line: &[u8]) -> FeedEvent {
+    let decoded = String::from_utf8_lossy(line);
+    let blocks = decoded
         .split(" | ")
         .enumerate()
         .map(|(i, text)| FeedBlock {
@@ -401,11 +405,30 @@ mod tests {
 
     #[test]
     fn parse_line_splits_blocks_on_pipe_separator() {
-        let FeedEvent::Frame { blocks } = parse_line("alpha | beta | gamma");
+        let FeedEvent::Frame { blocks } = parse_line(b"alpha | beta | gamma");
         let texts: Vec<&str> = blocks.iter().map(|b| b.text.as_str()).collect();
         assert_eq!(texts, vec!["alpha", "beta", "gamma"]);
         let names: Vec<&str> = blocks.iter().map(|b| b.name.as_str()).collect();
         assert_eq!(names, vec!["b0", "b1", "b2"]);
+    }
+
+    #[test]
+    fn parse_line_lossy_decodes_malformed_bytes_to_mojibake() {
+        // Misbehaving producer emits invalid UTF-8 mid-block. We must NOT panic; the affected
+        // block should degrade to a replacement char (U+FFFD).
+        let mut line: Vec<u8> = b"good | bad-".to_vec();
+        line.extend_from_slice(&[0xFE, 0xFF]); // invalid as UTF-8 start bytes
+        line.extend_from_slice(b"-rest");
+        let FeedEvent::Frame { blocks } = parse_line(&line);
+        assert_eq!(blocks.len(), 2);
+        assert_eq!(blocks[0].text, "good");
+        assert!(blocks[1].text.starts_with("bad-"));
+        assert!(blocks[1].text.ends_with("-rest"));
+        assert!(
+            blocks[1].text.contains('\u{FFFD}'),
+            "mojibake replacement expected, got {:?}",
+            blocks[1].text
+        );
     }
 
     #[test]
