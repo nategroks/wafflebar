@@ -25,7 +25,7 @@ use crate::plugins::network::backend::{NetworkBackend, NmBackend};
 use crate::plugins::statustray::backend::SniBackend;
 use crate::plugins::volume::backend::PulseBackend;
 use crate::render::{Host, PluginSlot};
-use crate::wm::{connect_backend, WmConnection};
+use crate::wm::{connect_backend, BackendSelect, WmConnection};
 
 /// Build the bar(s) on the selected monitor(s), wiring each to the shared dwl backend.
 /// `config_path` (when present) is watched for live reload.
@@ -35,6 +35,7 @@ pub fn build_bars(
     engine: &GridEngine,
     config_path: Option<&std::path::Path>,
     replace_notifications: bool,
+    backend_select: BackendSelect,
 ) {
     let Some(display) = gdk::Display::default() else {
         warn!("no GDK display; cannot create bars");
@@ -58,7 +59,7 @@ pub fn build_bars(
 
     // One compositor connection, shared across bars (dwl today; sway in PR-B). `None` on an
     // unsupported session — the bar still runs, WM-driven modules just stay empty.
-    let backend = connect_backend();
+    let backend = connect_backend(backend_select);
 
     let monitors = display.monitors();
     let mut mons: Vec<gdk::Monitor> = Vec::new();

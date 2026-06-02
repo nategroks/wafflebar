@@ -8,6 +8,7 @@ mod app;
 mod config_reload;
 mod dropdown;
 mod event_loop;
+mod feeds;
 mod menu;
 mod notify;
 mod notify_ui;
@@ -40,6 +41,15 @@ struct Cli {
     /// Take over `org.freedesktop.Notifications` from an existing daemon (mako, dunst, …).
     #[arg(long)]
     replace_notifications: bool,
+    /// Read dwl's `-s` status protocol from our stdin (vanilla-dwl mode, no IPC patch required).
+    /// Implies that this process was spawned by `dwl -s wafflebar`. Disables `WmCommand`
+    /// execution (the stdin channel is one-way). See `docs/NATEWM_MODE.md`.
+    #[arg(long)]
+    dwl_status_stdin: bool,
+    /// UNIX socket path for the someblocks-style external block feed (clock / mem / …).
+    /// Default: `$XDG_RUNTIME_DIR/wafflebar/feed.sock`. Unset = feed disabled.
+    #[arg(long, value_name = "PATH")]
+    status_socket: Option<PathBuf>,
 }
 
 fn main() -> Result<()> {
@@ -54,8 +64,13 @@ fn main() -> Result<()> {
         .with_env_filter(EnvFilter::try_from_env("WAFFLEBAR_LOG").unwrap_or_else(|_| EnvFilter::new("info")))
         .init();
 
-    let cli = Cli::parse();
-    let (config, config_path) = load_config(cli.config)?;
+    let Cli {
+        config: config_arg,
+        replace_notifications,
+        dwl_status_stdin,
+        status_socket: _status_socket,
+    } = Cli::parse();
+    let (config, config_path) = load_config(config_arg)?;
 
     // Validate the grid up front so a bad layout fails before we open any windows.
     let engine = GridEngine::build(&config).context("invalid bar layout")?;
@@ -65,10 +80,21 @@ fn main() -> Result<()> {
         "layout validated"
     );
 
-    let replace_notifications = cli.replace_notifications;
+    let backend_select = wm::BackendSelect {
+        force_dwl_stdin: dwl_status_stdin,
+    };
+    // `_status_socket` plumbs through to the someblocks intake in NATEWM_MODE step 2 — kept off
+    // the call signature today so the scaffold doesn't fake-wire something it can't honor.
     let app = Application::builder().application_id(APP_ID).build();
     app.connect_activate(move |app| {
-        app::build_bars(app, &config, &engine, config_path.as_deref(), replace_notifications);
+        app::build_bars(
+            app,
+            &config,
+            &engine,
+            config_path.as_deref(),
+            replace_notifications,
+            backend_select,
+        );
     });
 
     // We parse our own args with clap, so don't let GTK touch argv.
