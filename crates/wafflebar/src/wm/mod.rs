@@ -28,6 +28,15 @@ pub trait WmConnection: WindowManager {
     fn fd(&self) -> RawFd;
     /// Drain the connection on an fd wake-up, returning accumulated events.
     fn dispatch(&mut self) -> Vec<WmEvent>;
+    /// `true` once the backend has observed the compositor going away (EOF / socket closed).
+    /// Default: `false` (backends that don't model graceful compositor exit override as needed).
+    /// Host integration (step 3) observes this after `dispatch` and triggers a clean process exit
+    /// — under `dwl -s`, dwl is gone, the session is unrecoverable, but we still run the SIGTERM
+    /// socket-cleanup path before returning so a restart doesn't trip the stale-socket branch.
+    #[allow(dead_code)] // step-3 host integration is the only caller
+    fn closed(&self) -> bool {
+        false
+    }
 }
 
 /// How the host selects a backend. Default = autodetect (sway → dwl-ipc → stdin probe);

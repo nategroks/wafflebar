@@ -39,6 +39,9 @@ async-channel = "2.5"
 # sway/i3 backend: the i3-ipc payload is JSON over a framed socket. serde derives the reply structs.
 serde = { workspace = true, features = ["derive"] }
 serde_json = "1"
+# NATEWM_MODE — vanilla-dwl `-s` stdin backend + someblocks socket intake. Need fcntl/isatty/read
+# on raw fds (std doesn't expose them). Already transitive via gtk4; pinning the version we link.
+libc = "0.2"
 # GTK + Wayland deps are added via `cargo add` (M1) so versions resolve compatibly.
 
 [dev-dependencies]
