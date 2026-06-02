@@ -1,0 +1,69 @@
+# wafflebar — natewm-mode preset.
+#
+# Drop this in as `~/.config/wafflebar/config.toml` (or point `wafflebar -c` at it) when running
+# under vanilla dwl with the `-s` stdin status protocol. Pair with:
+#
+#   exec dwl -s 'wafflebar --dwl-status-stdin'
+#   (sidecar) natewm-status | socat - UNIX-CONNECT:$XDG_RUNTIME_DIR/wafflebar/feed.sock
+#
+# The dwl IPC patch is NOT required — `--dwl-status-stdin` makes wafflebar read the protocol
+# off its stdin (the pipe dwl spawns it with). All `WmCommand`s emitted by clicks are dropped
+# silently with a one-time `info` log on first drop ("WM command dropped: dwl `-s` is a one-way
+# status channel, clicks/scrolls can't route back without the IPC patch") — that's the contract
+# trade-off for not needing the patch.
+#
+# The someblocks-style block feed is a SEPARATE input channel — a UNIX socket at
+# `$XDG_RUNTIME_DIR/wafflebar/feed.sock` (overridable via `--status-socket PATH`). The producer
+# (natewm-status or any someblocks-shaped script) writes one line per refresh; blocks within
+# the line are separated by ` | `; the latest frame wins (coalesce-latest, by construction —
+# the renderer is never back-pressured). See docs/NATEWM_MODE.md.
+
+schema = 1
+
+[bar]
+position = "top"
+height = 26
+theme = "nord"            # Built-in Nord (themes/nord.css). Hurmit Nerd Font Mono is requested
+                          # by the CSS; verify it binds via `fc-match 'Hurmit Nerd Font Mono'`
+                          # — should resolve to the actual OTF, not a fallback.
+layout = "pack"           # Left/center/right via CenterBox; matches the dwlb visual rhythm.
+monitor = "all"           # One bar per output. natewm rig is multi-head.
+
+# ────────────────────────────────────────────────────────────────────────────────
+# Channel 1 — dwl `-s` stdin: tags, layout symbol, focused-window title.
+#
+# These three plugins all subscribe to `Topic::Wm` and consume the WmEvents produced by the
+# stdin reducer (which coalesces dwl's per-line records into per-monitor snapshots). On vanilla
+# dwl with no IPC patch, this is the full WM-state surface.
+# ────────────────────────────────────────────────────────────────────────────────
+
+[[modules]]
+type = "tags"
+cell = { row = 0, col = 0 }
+align = "start"
+
+[[modules]]
+type = "layout"
+cell = { row = 0, col = 1 }
+align = "start"
+
+[[modules]]
+type = "window"
+cell = { row = 0, col = 2 }
+align = "center"
+max_chars = 80           # Truncate over-long titles with `…`; dwlb-parity behavior.
+
+# ────────────────────────────────────────────────────────────────────────────────
+# Channel 2 — someblocks UNIX-socket feed: clock, mem, anything someblocks-shaped.
+#
+# The producer (natewm-status or similar) writes block lines to the socket. wafflebar reads on
+# its OWN GLib readable callback (separate from the WM watch and from the GTK render tick) —
+# the "two clocks" property in `app.rs::present_bar`. Per-block class is `feedblock b{i}` so
+# Nord theme rules can target position-specific blocks (active clock in Frost, etc.).
+# ────────────────────────────────────────────────────────────────────────────────
+
+[[modules]]
+type = "feedblocks"
+cell = { row = 0, col = 3 }
+align = "end"
+gap = 8

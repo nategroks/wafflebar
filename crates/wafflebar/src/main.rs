@@ -20,16 +20,58 @@ mod shell;
 mod wm;
 
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use clap::Parser;
 use gtk4::prelude::*;
+use gtk4::gio::ApplicationFlags;
 use gtk4::Application;
 use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
 use wafflebar_core::{Config, GridEngine};
 
 const APP_ID: &str = "dev.wafflebar.Wafflebar";
+
+/// Set on SIGTERM/SIGINT (via [`signal_handler`]) and on `WmConnection::closed()` after a
+/// dispatch (via the WM fd watch). The `build_bars` shutdown timer polls this and, when set,
+/// runs the same idempotent [`crate::feeds::someblocks::SomeblocksIntake::cleanup`] from
+/// **every** code path before calling `app.quit()` — NATEWM_MODE flag 5 amendment, wired.
+static SHUTDOWN_REQUESTED: AtomicBool = AtomicBool::new(false);
+
+/// True iff a graceful exit has been requested.
+pub fn shutdown_requested() -> bool {
+    SHUTDOWN_REQUESTED.load(Ordering::Relaxed)
+}
+
+/// Flip the shutdown flag from anywhere (signal handler, WM EOF observer, …).
+pub fn request_shutdown() {
+    SHUTDOWN_REQUESTED.store(true, Ordering::Relaxed);
+}
+
+/// Async-signal-safe — only stores into the atomic. No allocation, no logging, no FFI beyond
+/// the atomic store itself (Rust's `Ordering::Relaxed` lowers to a single store).
+unsafe extern "C" fn signal_handler(_signum: libc::c_int) {
+    SHUTDOWN_REQUESTED.store(true, Ordering::Relaxed);
+}
+
+fn install_signal_handlers() -> Result<()> {
+    unsafe {
+        let mut action: libc::sigaction = std::mem::zeroed();
+        action.sa_sigaction = signal_handler as *const () as usize;
+        action.sa_flags = libc::SA_RESTART;
+        libc::sigemptyset(&mut action.sa_mask);
+        for sig in [libc::SIGTERM, libc::SIGINT] {
+            if libc::sigaction(sig, &action, std::ptr::null_mut()) != 0 {
+                bail!(
+                    "sigaction signum {sig}: {}",
+                    std::io::Error::last_os_error()
+                );
+            }
+        }
+    }
+    Ok(())
+}
 
 /// A griddy Wayland status bar. No bloat.
 #[derive(Debug, Parser)]
@@ -63,6 +105,11 @@ fn main() -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::try_from_env("WAFFLEBAR_LOG").unwrap_or_else(|_| EnvFilter::new("info")))
         .init();
+
+    // Install signal handlers BEFORE GTK so SIGTERM/SIGINT routes to our static flag instead of
+    // an inherited default (or GTK's own SIGINT trap). The shutdown timer in build_bars observes
+    // the flag and runs the feed cleanup before calling app.quit().
+    install_signal_handlers().context("installing SIGTERM/SIGINT handlers")?;
 
     let Cli {
         config: config_arg,
@@ -98,7 +145,18 @@ fn main() -> Result<()> {
     if feed_socket.path.is_none() {
         info!("feed disabled: XDG_RUNTIME_DIR unset and no --status-socket override");
     }
-    let app = Application::builder().application_id(APP_ID).build();
+    // `WAFFLEBAR_NON_UNIQUE=1` opts out of the GTK Application unique-instance behavior — needed
+    // for nested test runs (cage'd dwl) where the user's daily-driver wafflebar already owns the
+    // APP_ID on the session bus, which would otherwise remote-activate our new process and exit
+    // it before it can build any bar. Production: leave unset; the unique-instance behavior is
+    // correct for daily use (a second `wafflebar` invocation re-activates the running one
+    // instead of double-binding).
+    let mut builder = Application::builder().application_id(APP_ID);
+    if std::env::var_os("WAFFLEBAR_NON_UNIQUE").is_some() {
+        builder = builder.flags(ApplicationFlags::NON_UNIQUE);
+        info!("WAFFLEBAR_NON_UNIQUE=1: GTK Application unique-instance behavior disabled");
+    }
+    let app = builder.build();
     app.connect_activate(move |app| {
         app::build_bars(
             app,

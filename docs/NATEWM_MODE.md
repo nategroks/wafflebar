@@ -12,23 +12,91 @@
 > EOF-exit wiring.
 >
 > **Step 3a — two-clocks wiring + UTF-8 robustness:** ✅ landed
-> (commits `06c991d` + this commit). Both channels get their own
+> (commits `06c991d` + `5e03cec`). Both channels get their own
 > `event_loop::add_fd_watch_local` source at `G_PRIORITY_DEFAULT`, with
 > `// === Clock 1: WM fd. ===` and `// === Clock 2: someblocks feed fd. ===`
-> markers in `app.rs::present_bar`. Neither is tied to the GTK render tick. The
-> reducers' coalesce-latest means a slow renderer cannot back-pressure either
-> producer. UTF-8 fix-now: titles + block text lossy-decode to mojibake (U+FFFD)
-> rather than dropping the line. Core gained `Event::Feed(FeedEvent)` +
-> `Topic::Feed` (additive — existing match arms with wildcards unaffected).
+> markers in `app.rs::present_bar`.
 >
-> **Step 3b — frame rendering + signals + preset + live verify:** ⏳ deferred.
-> Build the `feedblocks` plugin (subscribes to `Topic::Feed`, renders the latest
-> frame's blocks as a horizontal row of CSS-themable labels); wire SIGTERM/SIGINT
-> to `SomeblocksIntake::cleanup()`; observe `WmConnection::closed()` after each
-> dispatch and exit (running cleanup) when the compositor goes away; ship
-> `themes/natewm-preset.toml`; capture a multi-monitor golden fixture from cage
-> with `WLR_WL_OUTPUTS=2` (or real heads); live-verify on dwl via
-> `dwl -s 'wafflebar --dwl-status-stdin'` with a `natewm-status` feeder.
+> **Step 3b — frame rendering + signals + preset + live verify:** ✅ landed
+> (this commit). `feedblocks` plugin subscribes to `Topic::Feed` and renders
+> blocks as a horizontal row (`.feedblock.b{i}` per-position class). Tiny
+> `layout` plugin so the contract's "tags + layout symbol + focused title" is
+> fully covered. SIGTERM/SIGINT handler flips a static AtomicBool; a
+> `glib::timeout_add_local(100ms)` polls it and runs the SAME idempotent
+> `SomeblocksIntake::cleanup()` from EVERY exit site (signal, EOF, `Drop`) — the
+> stale-socket branch is structurally unreachable. `WmConnection::closed()`
+> observed after every WM dispatch — when dwl exits, the same shutdown path runs.
+> `themes/natewm-preset.toml` ships the contract preset.
+> Multi-monitor wire fixture captured at
+> `tests/fixtures/dwl_stdin_v0.8_multimon.txt` (`WLR_WL_OUTPUTS=2` inside cage)
+> and pinned by `multi_monitor_state_is_independent_on_the_wire`.
+> Live verify: ran `dwl -s 'wafflebar --dwl-status-stdin'` inside cage'd dwl,
+> pushed `"14:23 | mem 7421/64000Mi"` via `socat` to the feed socket, screenshot
+> shows tags 1-9 + layout `(@)` + title "gero@whatsit wafflebar" + feedblocks
+> "14:23 mem 7421/64000Mi" all rendering simultaneously. Definition of done met:
+> indistinguishable from the dwlb setup on unpatched dwl, with the someblocks
+> feed untouched.
+>
+> **Open render-time item:** selmon-flipping-attaches-focused-title-to-the-correct-strip
+> needs pointer-into-other-output simulation; the wire-level multi-monitor test
+> covers what unit tests can. Carries as a defer-to-future-render-test item.
+
+## Step-3 amendment confirmations
+
+- **Multi-monitor wire fixture (flag 1):** captured via `WLR_WL_OUTPUTS=2` cage +
+  `dwl -s 'sh -c "...exec cat > FILE"'`. 231 lines, 3572 bytes, both `WL-1`
+  (selmon=1, hosts the foots) and `WL-2` (selmon=0, empty) interleave in the
+  capture. The `multi_monitor_state_is_independent_on_the_wire` test parses it
+  and asserts the two monitors stay independent and that `WL-2`'s empty title
+  survives the interleave (a wrong-key parser would cross-pollinate).
+- **Same `cleanup` function from all 3 sites (flag 5):** SIGTERM/SIGINT path,
+  EOF-from-WM-backend path, and `Drop` path all call
+  `SomeblocksIntake::cleanup(&mut self)`. The function is guarded by
+  `self.cleaned` (idempotent). The shutdown timer in `present_bar` explicitly
+  calls it before `app.quit()`, so cleanup happens *before* the GTK unwind drops
+  the intake. A session restart can never reach the stale-socket branch of
+  `SomeblocksIntake::bind`.
+- **feedblocks parity, not novelty (flag 3):** the plugin renders only what the
+  producer delivers — no menus, no popovers, no click handlers. Per-block
+  positional class for CSS theming; that's it. Matches the dwlb right-strip
+  shape.
+
+## Live-verify replay
+
+To reproduce locally:
+
+```sh
+# 1) Build wafflebar (already done):
+cargo build --release -p wafflebar
+
+# 2) Make sure cage and the pinned dwl exist (one-time):
+ls /tmp/cage/build/cage /home/gero/code/natewm-asm/vendor/dwl/dwl
+
+# 3) Wrapper script — `<&0` overrides bash's background-stdin = /dev/null
+#    default; without it, wafflebar's stdin is dev-null'd and EOF fires instantly.
+cat > /tmp/wb-live-wrapper.sh <<'EOF'
+#!/bin/bash
+/home/gero/wafflebar/target/release/wafflebar \
+    --dwl-status-stdin \
+    --status-socket /tmp/wb-live.sock \
+    -c /home/gero/wafflebar/themes/natewm-preset.toml <&0 &
+sleep 1.5
+foot --title=ALPHA &
+sleep 0.7
+foot --title=BETA &
+wait
+EOF
+chmod +x /tmp/wb-live-wrapper.sh
+
+# 4) Launch. `WAFFLEBAR_NON_UNIQUE=1` lets the test instance coexist with the
+#    user's daily-driver wafflebar on the same session bus.
+WAFFLEBAR_NON_UNIQUE=1 WLR_BACKENDS=wayland WAYLAND_DISPLAY="$WAYLAND_DISPLAY" \
+  setsid /tmp/cage/build/cage -- /home/gero/code/natewm-asm/vendor/dwl/dwl \
+    -s /tmp/wb-live-wrapper.sh </dev/null >/tmp/wb-live.log 2>&1 &
+
+# 5) Push a feed frame:
+echo "14:23 | mem 7421/64000Mi" | socat - UNIX-CONNECT:/tmp/wb-live.sock
+```
 
 ## Five flags signed off (step-1 review)
 

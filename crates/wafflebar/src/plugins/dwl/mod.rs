@@ -2,5 +2,6 @@
 //! [`WmEvent`](wafflebar_core::WmEvent)s, never dwl APIs directly). M2: `tags`, `window`,
 //! `taskbar`.
 
+pub mod layout;
 pub mod tags;
 pub mod window;

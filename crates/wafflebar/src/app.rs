@@ -189,7 +189,9 @@ fn present_bar(
 
     // === Clock 1: WM fd. ===
     // Wake on the WM backend's readable fd, drain its dispatch(), deliver WmEvents to the host.
-    // The source lives for the process lifetime. NOT tied to the GTK render tick.
+    // After every dispatch, check `closed()` — when dwl exits, the stdin backend flips this and
+    // we route through the same shutdown path as SIGTERM/SIGINT (NATEWM_MODE flag 5).
+    // NOT tied to the GTK render tick.
     if let Some(b) = backend {
         for ev in b.borrow().snapshot() {
             host.deliver_event(&Event::Wm(ev));
@@ -200,6 +202,13 @@ fn present_bar(
         let _fd_source = event_loop::add_fd_watch_local(fd, move || {
             for ev in b_p.borrow_mut().dispatch() {
                 host_p.deliver_event(&Event::Wm(ev));
+            }
+            if b_p.borrow().closed() {
+                tracing::info!(
+                    "WM backend reported closed (compositor exited); requesting graceful shutdown"
+                );
+                crate::request_shutdown();
+                return glib::ControlFlow::Break;
             }
             glib::ControlFlow::Continue
         });
@@ -219,7 +228,33 @@ fn present_bar(
             for ev in f_p.borrow_mut().dispatch() {
                 host_p.deliver_event(&Event::Feed(ev));
             }
+            if crate::shutdown_requested() {
+                return glib::ControlFlow::Break;
+            }
             glib::ControlFlow::Continue
+        });
+    }
+
+    // === Shutdown observer. ===
+    // Polls the static SHUTDOWN_REQUESTED flag (set by signal handlers or the WM EOF observer
+    // in the Clock-1 callback above). When the flag flips, we run the *one* idempotent
+    // `SomeblocksIntake::cleanup()` explicitly — same function the `Drop` impl calls — so all
+    // exit paths converge on a single unlink site. NATEWM_MODE flag 5 (amended): SIGTERM, EOF,
+    // and Drop all route through this one cleanup function. A session restart cannot reach the
+    // stale-socket branch of `SomeblocksIntake::bind`.
+    {
+        let app_p = app.clone();
+        let feed_for_cleanup = feed.clone();
+        glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
+            if !crate::shutdown_requested() {
+                return glib::ControlFlow::Continue;
+            }
+            tracing::info!("shutdown observed; running socket cleanup + app.quit()");
+            if let Some(f) = &feed_for_cleanup {
+                f.borrow_mut().cleanup();
+            }
+            app_p.quit();
+            glib::ControlFlow::Break
         });
     }
 
