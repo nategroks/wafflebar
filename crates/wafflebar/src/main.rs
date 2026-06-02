@@ -68,7 +68,7 @@ fn main() -> Result<()> {
         config: config_arg,
         replace_notifications,
         dwl_status_stdin,
-        status_socket: _status_socket,
+        status_socket,
     } = Cli::parse();
     let (config, config_path) = load_config(config_arg)?;
 
@@ -83,8 +83,21 @@ fn main() -> Result<()> {
     let backend_select = wm::BackendSelect {
         force_dwl_stdin: dwl_status_stdin,
     };
-    // `_status_socket` plumbs through to the someblocks intake in NATEWM_MODE step 2 — kept off
-    // the call signature today so the scaffold doesn't fake-wire something it can't honor.
+    // Feed socket path policy (NATEWM_MODE flag 4): explicit `--status-socket` wins; otherwise
+    // try `$XDG_RUNTIME_DIR/wafflebar/feed.sock`. Both absent → `None` (feed disabled). No silent
+    // fallback to `/tmp` — that's the multi-user trap the policy refuses.
+    let feed_socket = wafflebar_core::FeedSocketConfig {
+        path: status_socket.or_else(|| {
+            std::env::var_os("XDG_RUNTIME_DIR").map(|x| {
+                std::path::PathBuf::from(x)
+                    .join("wafflebar")
+                    .join("feed.sock")
+            })
+        }),
+    };
+    if feed_socket.path.is_none() {
+        info!("feed disabled: XDG_RUNTIME_DIR unset and no --status-socket override");
+    }
     let app = Application::builder().application_id(APP_ID).build();
     app.connect_activate(move |app| {
         app::build_bars(
@@ -94,6 +107,7 @@ fn main() -> Result<()> {
             config_path.as_deref(),
             replace_notifications,
             backend_select,
+            feed_socket.clone(),
         );
     });
 

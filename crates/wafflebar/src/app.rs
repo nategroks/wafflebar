@@ -25,7 +25,9 @@ use crate::plugins::network::backend::{NetworkBackend, NmBackend};
 use crate::plugins::statustray::backend::SniBackend;
 use crate::plugins::volume::backend::PulseBackend;
 use crate::render::{Host, PluginSlot};
+use crate::feeds::someblocks::SomeblocksIntake;
 use crate::wm::{connect_backend, BackendSelect, WmConnection};
+use wafflebar_core::FeedSocketConfig;
 
 /// Build the bar(s) on the selected monitor(s), wiring each to the shared dwl backend.
 /// `config_path` (when present) is watched for live reload.
@@ -36,6 +38,7 @@ pub fn build_bars(
     config_path: Option<&std::path::Path>,
     replace_notifications: bool,
     backend_select: BackendSelect,
+    feed_socket: FeedSocketConfig,
 ) {
     let Some(display) = gdk::Display::default() else {
         warn!("no GDK display; cannot create bars");
@@ -61,6 +64,26 @@ pub fn build_bars(
     // unsupported session — the bar still runs, WM-driven modules just stay empty.
     let backend = connect_backend(backend_select);
 
+    // One someblocks intake (NATEWM_MODE channel 2), shared across bars. `None` on disabled
+    // (no path) or refused bind (live owner / non-socket clobber); the bar still runs, the feed
+    // plugins just stay empty. Lives behind Rc<RefCell<>> so each bar's dispatch callback can
+    // mutably borrow it.
+    //
+    // **Two clocks (NATEWM_MODE flag 6, by construction).** The WM fd and the feed listener fd
+    // each get their *own* `event_loop::add_fd_watch_local` source below in `present_bar`. Both
+    // are GLib `g_unix_fd_add_full` sources at `G_PRIORITY_DEFAULT`; neither is tied to the
+    // GTK render tick. Read-side back-pressure on the renderer cannot back-pressure either
+    // producer — the reducer's coalesce-latest means the renderer reads the *current* snapshot
+    // at its own pace and never queues work.
+    let feed = match SomeblocksIntake::bind(&feed_socket, false) {
+        Ok(Some(intake)) => Some(Rc::new(RefCell::new(intake))),
+        Ok(None) => None,
+        Err(e) => {
+            warn!(error = %e, "feed disabled: someblocks bind failed");
+            None
+        }
+    };
+
     let monitors = display.monitors();
     let mut mons: Vec<gdk::Monitor> = Vec::new();
     for i in 0..monitors.n_items() {
@@ -73,14 +96,14 @@ pub fn build_bars(
     }
     if mons.is_empty() {
         warn!("no monitors reported; creating a single unanchored bar");
-        present_bar(app, None, config, engine, &backend, config_path);
+        present_bar(app, None, config, engine, &backend, &feed, config_path);
         return;
     }
 
     let targets = select_monitors(&mons, &config.bar.monitor);
     info!(want = config.bar.monitor, selected = targets.len(), total = mons.len(), "monitor selection");
     for mon in targets {
-        present_bar(app, Some(&mon), config, engine, &backend, config_path);
+        present_bar(app, Some(&mon), config, engine, &backend, &feed, config_path);
     }
 }
 
@@ -120,6 +143,7 @@ fn present_bar(
     config: &Config,
     engine: &GridEngine,
     backend: &Option<Rc<RefCell<dyn WmConnection>>>,
+    feed: &Option<Rc<RefCell<SomeblocksIntake>>>,
     config_path: Option<&std::path::Path>,
 ) {
     let output_name = monitor
@@ -163,21 +187,37 @@ fn present_bar(
     // Initial render so the bar isn't blank before the first event/tick (clock shows now).
     host.render_all();
 
-    // Feed the current WM snapshot, then drive live updates from the backend.
+    // === Clock 1: WM fd. ===
+    // Wake on the WM backend's readable fd, drain its dispatch(), deliver WmEvents to the host.
+    // The source lives for the process lifetime. NOT tied to the GTK render tick.
     if let Some(b) = backend {
         for ev in b.borrow().snapshot() {
             host.deliver_event(&Event::Wm(ev));
         }
-        // Wake on the wl_display fd becoming readable (G_IO_IN) rather than polling: a truly idle
-        // bar makes zero syscalls. `dispatch()` runs the unchanged read-guard dance. The source
-        // lives for the process lifetime (like the timer it replaced); we keep the SourceId so a
-        // future clean-shutdown path can `remove()` it before the wl_display is dropped.
         let fd = b.borrow().fd();
         let host_p = host.clone();
         let b_p = b.clone();
         let _fd_source = event_loop::add_fd_watch_local(fd, move || {
             for ev in b_p.borrow_mut().dispatch() {
                 host_p.deliver_event(&Event::Wm(ev));
+            }
+            glib::ControlFlow::Continue
+        });
+    }
+
+    // === Clock 2: someblocks feed fd. ===
+    // Independent of the WM watch and the GTK render tick. The listener fd becomes readable when
+    // a producer connects OR an already-connected producer writes; dispatch() handles both, and
+    // the reducer's coalesce-latest guarantees ≤1 FeedEvent::Frame per wake. If the renderer is
+    // slow, the producer is *not* back-pressured — the reducer overwrites in place. "Never
+    // blocks dwl"-style guarantee, by construction.
+    if let Some(f) = feed {
+        let fd = f.borrow().fd();
+        let host_p = host.clone();
+        let f_p = f.clone();
+        let _fd_source = event_loop::add_fd_watch_local(fd, move || {
+            for ev in f_p.borrow_mut().dispatch() {
+                host_p.deliver_event(&Event::Feed(ev));
             }
             glib::ControlFlow::Continue
         });

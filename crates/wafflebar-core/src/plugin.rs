@@ -10,6 +10,7 @@ use crate::audio::{VolumeCommand, VolumeEvent};
 use crate::bluetooth::{BluetoothCommand, BluetoothState};
 use crate::config::ModuleConfig;
 use crate::cpu::CpuState;
+use crate::feed::FeedEvent;
 use crate::freedesktop::Launch;
 use crate::memory::MemoryState;
 use crate::net::NetworkState;
@@ -44,6 +45,10 @@ pub enum Topic {
     /// Bluetooth (adapter power + paired-device connection) changes. The host starts the BlueZ
     /// backend only if some plugin subscribes to this.
     Bluetooth,
+    /// External block feed ([`FeedEvent`](crate::feed::FeedEvent)). The host binds the
+    /// someblocks-style intake only if some plugin subscribes — natewm-mode wires this; vanilla
+    /// configs leave it inert.
+    Feed,
 }
 
 /// An event delivered to a subscribed module.
@@ -65,6 +70,9 @@ pub enum Event {
     Tray(Vec<TrayItem>),
     /// The current Bluetooth state from the host's BlueZ backend (full snapshot on any change).
     Bluetooth(BluetoothState),
+    /// A snapshot from the external block feed (someblocks-shaped). Always replaces — the producer
+    /// owns ordering and timing, the bar renders the latest frame.
+    Feed(FeedEvent),
 }
 
 /// A module's response to an event or action: whether its view changed, plus any side effects
