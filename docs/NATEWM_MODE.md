@@ -1,17 +1,44 @@
 # NATEWM_MODE — vanilla-dwl `-s` + someblocks intake (design + status)
 
-> **Step 1 — two-channel scaffold:** 🚧 in progress (this commit). Skeleton types,
-> signatures, lifecycle plumbing, CLI flags, no parser bodies. Compiles clean (two
-> `dead_code` warnings on the as-yet-unused `SomeblocksIntake` are suppressed —
-> step 2 wires them up).
+> **Step 1 — two-channel scaffold:** ✅ landed (commit `ece3ab9`). Skeleton types,
+> signatures, lifecycle plumbing, CLI flags.
 >
-> **Step 2 — parser + listener bodies:** ⏳ deferred. Fill in `DwlStdinBackend::connect`,
-> `dispatch`, the per-monitor reducer, and `SomeblocksIntake::bind`/`dispatch`/loop.
+> **Step 2 — parser + listener bodies:** ✅ landed. `DwlStdinBackend::{connect, dispatch}`
+> + per-monitor `StatusReducer` (coalesce-latest by overwrite). `SomeblocksIntake::{bind,
+> dispatch, cleanup}` with the full policy package (XDG-scoped path, connect-probe
+> liveness, non-socket refusal, `Drop` + explicit cleanup). 16 tests pass, including the
+> live-fixture parser tests against `tests/fixtures/dwl_stdin_v0.8.txt`. `WmConnection`
+> grew an additive `closed(&self) -> bool` default-`false` method for the step-3 host
+> EOF-exit wiring.
 >
 > **Step 3 — host integration:** ⏳ deferred. Plug `SomeblocksIntake.fd()` into the GLib
 > main loop next to the existing WM fd; route `FeedEvent::Frame` to the right-side strip
-> plugins. Live-verify on dwl via `dwl -s 'wafflebar --dwl-status-stdin'` with a
-> `natewm-status` feeder writing to the socket.
+> plugins; wire SIGTERM/SIGINT to `cleanup()`; observe `WmConnection::closed()` after
+> each dispatch and exit (running cleanup) when the compositor goes away. Live-verify on
+> dwl via `dwl -s 'wafflebar --dwl-status-stdin'` with a `natewm-status` feeder writing
+> to the socket.
+
+## Five flags signed off (step-1 review)
+
+1. `BackendSelect` shape — additive struct (composes, doesn't exclude). ✅
+2. `execute()` drop policy on `DwlStdinBackend` — first-drop-per-session info log with
+   cause-naming message: *"WM command dropped: dwl `-s` is a one-way status channel,
+   clicks/scrolls can't route back without the IPC patch"*. ✅
+3. Grammar — docstring + live-captured golden fixture
+   (`tests/fixtures/dwl_stdin_v0.8.txt`, raw bytes from `cage` + pinned dwl). ✅
+4. Someblocks socket policy — XDG-scoped, hard error on missing XDG (caller-side path
+   policy in main.rs leaves `cfg.path = None` → bind returns `Ok(None)` → feed
+   disabled), connect-probe liveness, refuse-clobber on non-socket, idempotent cleanup,
+   `Drop` + explicit `cleanup()`. ✅
+5. Reconnect/EOF — `DwlStdinBackend::closed()` flips on EOF/read-error; host (step 3)
+   observes and exits, running the same `SomeblocksIntake::cleanup()` the SIGTERM path
+   does. ✅
+
+**Flag 6 (backpressure / coalesce-latest):** built into both reducers by construction.
+The `StatusReducer` overwrites per-monitor field values on every applicable line; the
+`SomeblocksIntake` per-conn loop overwrites a single `Option<FeedEvent>` candidate. A
+100-frame burst from either side produces ≤1 snapshot per dispatch — "never blocks dwl"
+is true by construction, not by timing luck.
 
 ## Contract (from natewm-asm Phase 4 build prompt — verbatim shape)
 

@@ -1849,6 +1849,7 @@ dependencies = [
  "clap",
  "gtk4",
  "gtk4-layer-shell",
+ "libc",
  "libpulse-binding",
  "libpulse-glib-binding",
  "serde",
