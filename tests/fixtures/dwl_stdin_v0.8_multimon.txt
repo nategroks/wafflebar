@@ -1,0 +1,231 @@
+WL-2 title 
+WL-2 appid 
+WL-2 fullscreen 
+WL-2 floating 
+WL-2 selmon 0
+WL-2 tags 0 1 0 0
+WL-2 layout (@)
+WL-1 title 
+WL-1 appid 
+WL-1 fullscreen 
+WL-1 floating 
+WL-1 selmon 1
+WL-1 tags 0 1 0 0
+WL-1 layout (@)
+WL-2 title 
+WL-2 appid 
+WL-2 fullscreen 
+WL-2 floating 
+WL-2 selmon 0
+WL-2 tags 0 1 0 0
+WL-2 layout (@)
+WL-1 title 
+WL-1 appid 
+WL-1 fullscreen 
+WL-1 floating 
+WL-1 selmon 1
+WL-1 tags 0 1 0 0
+WL-1 layout (@)
+WL-2 title 
+WL-2 appid 
+WL-2 fullscreen 
+WL-2 floating 
+WL-2 selmon 0
+WL-2 tags 0 1 0 0
+WL-2 layout (@)
+WL-1 title 
+WL-1 appid 
+WL-1 fullscreen 
+WL-1 floating 
+WL-1 selmon 1
+WL-1 tags 0 1 0 0
+WL-1 layout (@)
+WL-2 title 
+WL-2 appid 
+WL-2 fullscreen 
+WL-2 floating 
+WL-2 selmon 0
+WL-2 tags 0 1 0 0
+WL-2 layout (@)
+WL-1 title 
+WL-1 appid 
+WL-1 fullscreen 
+WL-1 floating 
+WL-1 selmon 1
+WL-1 tags 0 1 0 0
+WL-1 layout (@)
+WL-2 title 
+WL-2 appid 
+WL-2 fullscreen 
+WL-2 floating 
+WL-2 selmon 0
+WL-2 tags 0 1 0 0
+WL-2 layout (@)
+WL-1 title 
+WL-1 appid 
+WL-1 fullscreen 
+WL-1 floating 
+WL-1 selmon 1
+WL-1 tags 0 1 0 0
+WL-1 layout (@)
+WL-2 title 
+WL-2 appid 
+WL-2 fullscreen 
+WL-2 floating 
+WL-2 selmon 0
+WL-2 tags 0 1 0 0
+WL-2 layout (@)
+WL-1 title 
+WL-1 appid 
+WL-1 fullscreen 
+WL-1 floating 
+WL-1 selmon 1
+WL-1 tags 0 1 0 0
+WL-1 layout (@)
+WL-2 title 
+WL-2 appid 
+WL-2 fullscreen 
+WL-2 floating 
+WL-2 selmon 0
+WL-2 tags 0 1 0 0
+WL-2 layout (@)
+WL-1 title 
+WL-1 appid 
+WL-1 fullscreen 
+WL-1 floating 
+WL-1 selmon 1
+WL-1 tags 0 1 0 0
+WL-1 layout (@)
+WL-2 title 
+WL-2 appid 
+WL-2 fullscreen 
+WL-2 floating 
+WL-2 selmon 0
+WL-2 tags 0 1 0 0
+WL-2 layout (@)
+WL-1 title ALPHA
+WL-1 appid foot
+WL-1 fullscreen 0
+WL-1 floating 0
+WL-1 selmon 1
+WL-1 tags 1 1 1 0
+WL-1 layout (@)
+WL-2 title 
+WL-2 appid 
+WL-2 fullscreen 
+WL-2 floating 
+WL-2 selmon 0
+WL-2 tags 0 1 0 0
+WL-2 layout (@)
+WL-1 title ALPHA
+WL-1 appid foot
+WL-1 fullscreen 0
+WL-1 floating 0
+WL-1 selmon 1
+WL-1 tags 1 1 1 0
+WL-1 layout (@)
+WL-2 title 
+WL-2 appid 
+WL-2 fullscreen 
+WL-2 floating 
+WL-2 selmon 0
+WL-2 tags 0 1 0 0
+WL-2 layout (@)
+WL-1 title ALPHA
+WL-1 appid foot
+WL-1 fullscreen 0
+WL-1 floating 0
+WL-1 selmon 1
+WL-1 tags 1 1 1 0
+WL-1 layout (@)
+WL-2 title 
+WL-2 appid 
+WL-2 fullscreen 
+WL-2 floating 
+WL-2 selmon 0
+WL-2 tags 0 1 0 0
+WL-2 layout (@)
+WL-1 title ALPHA
+WL-1 appid foot
+WL-1 fullscreen 0
+WL-1 floating 0
+WL-1 selmon 1
+WL-1 tags 1 1 1 0
+WL-1 layout (@)
+WL-2 title 
+WL-2 appid 
+WL-2 fullscreen 
+WL-2 floating 
+WL-2 selmon 0
+WL-2 tags 0 1 0 0
+WL-2 layout (@)
+WL-1 title BETA
+WL-1 appid foot
+WL-1 fullscreen 0
+WL-1 floating 0
+WL-1 selmon 1
+WL-1 tags 1 1 1 0
+WL-1 layout (@)
+WL-2 title 
+WL-2 appid 
+WL-2 fullscreen 
+WL-2 floating 
+WL-2 selmon 0
+WL-2 tags 0 1 0 0
+WL-2 layout (@)
+WL-1 title BETA
+WL-1 appid foot
+WL-1 fullscreen 0
+WL-1 floating 0
+WL-1 selmon 1
+WL-1 tags 1 1 1 0
+WL-1 layout (@)
+WL-2 title 
+WL-2 appid 
+WL-2 fullscreen 
+WL-2 floating 
+WL-2 selmon 0
+WL-2 tags 0 1 0 0
+WL-2 layout (@)
+WL-1 title BETA
+WL-1 appid foot
+WL-1 fullscreen 0
+WL-1 floating 0
+WL-1 selmon 1
+WL-1 tags 1 1 1 0
+WL-1 layout (@)
+WL-2 title 
+WL-2 appid 
+WL-2 fullscreen 
+WL-2 floating 
+WL-2 selmon 0
+WL-2 tags 0 1 0 0
+WL-2 layout (@)
+WL-1 title BETA
+WL-1 appid foot
+WL-1 fullscreen 0
+WL-1 floating 0
+WL-1 selmon 1
+WL-1 tags 1 1 1 0
+WL-1 layout (@)
+WL-2 title 
+WL-2 appid 
+WL-2 fullscreen 
+WL-2 floating 
+WL-2 selmon 0
+WL-2 tags 0 1 0 0
+WL-2 layout (@)
+WL-1 title gero@whatsit wafflebar
+WL-1 appid foot
+WL-1 fullscreen 0
+WL-1 floating 0
+WL-1 selmon 1
+WL-1 tags 1 1 1 0
+WL-1 layout (@)
+WL-1 title gero@whatsit wafflebar
+WL-1 appid foot
+WL-1 fullscreen 0
+WL-1 floating 0
+WL-1 selmon 1
+WL-1 tags 1 1 1 0
+WL-1 layout (@)

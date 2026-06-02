@@ -9,6 +9,7 @@ pub mod bluetooth;
 pub mod clock;
 pub mod cpu;
 pub mod dwl;
+pub mod feedblocks;
 pub mod launcher;
 pub mod memory;
 pub mod network;
@@ -33,6 +34,7 @@ pub fn build(kind: &str, output: &str, cfg: &ModuleConfig, caps: &Caps) -> Box<d
         "appmenu" => Box::new(appmenu::AppMenu::new(cfg)),
         "clock" => Box::new(clock::Clock::new(cfg)),
         "tags" => Box::new(dwl::tags::Tags::new(output)),
+        "layout" => Box::new(dwl::layout::Layout::new(output)),
         "window" => Box::new(dwl::window::Window::new(output, dwl::window::read_max_chars(cfg))),
         "tasklist" => Box::new(tasklist::Tasklist::new(output, tasklist::read_max_chars(cfg))),
         "launcher" => Box::new(launcher::Launcher::new(cfg)),
@@ -44,6 +46,7 @@ pub fn build(kind: &str, output: &str, cfg: &ModuleConfig, caps: &Caps) -> Box<d
         "cpu" => Box::new(cpu::Cpu::new()),
         "statustray" => Box::new(statustray::StatusTray::new()),
         "bluetooth" => Box::new(bluetooth::Bluetooth::new()),
+        "feedblocks" => Box::new(feedblocks::FeedBlocks::new(cfg)),
         other => Box::new(Placeholder::new(other)),
     }
 }
@@ -79,6 +82,7 @@ pub fn catalog() -> Vec<PluginInfo> {
         info("separator", "Separator", "Blank space, a line, or a grip; can expand to push items apart.", "view-list-symbolic", false),
         info("tasklist", "Task list", "A button per open window.", "view-list-symbolic", false),
         info("tags", "Tags", "Workspace / tag indicator (dwl).", "view-grid-symbolic", false),
+        info("layout", "Layout symbol", "Current tiling layout symbol (dwl).", "view-grid-symbolic", false),
         info("window", "Window title", "Title of the focused window.", "window-new-symbolic", false),
         info("showdesktop", "Show desktop", "Minimize all windows (where the compositor supports it).", "user-desktop-symbolic", false),
         info("memory", "Memory", "RAM usage.", "utilities-system-monitor-symbolic", false),
@@ -87,6 +91,7 @@ pub fn catalog() -> Vec<PluginInfo> {
         info("network", "Network", "Connection status. Starting its backend needs a restart.", "network-wireless-symbolic", false),
         info("statustray", "System tray", "Status-notifier icons from running apps.", "preferences-system-notifications-symbolic", true),
         info("bluetooth", "Bluetooth", "Adapter power + paired devices. Starting its backend needs a restart.", "bluetooth-symbolic", true),
+        info("feedblocks", "Feed blocks", "Render someblocks-style external status blocks (natewm-mode channel 2).", "view-list-symbolic", true),
     ]
 }
 
