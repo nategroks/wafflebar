@@ -56,6 +56,13 @@ the shared load buckets below.)
 **appmenu** — `.appmenu` (bar button); `.appmenu-popover` (the host-rendered two-pane menu surface;
 style its inner `row:selected` / `entry` via descendants).
 
+**controlcenter** — `.controlcenter` (bar button + the host-rendered quick-settings panel, also on
+`popover.controlcenter > contents`). Panel internals: `.cc-header`, `.cc-time`, `.cc-date`,
+`.cc-battery`, `.cc-stats` / `.cc-stat`; sliders `.cc-slider` (+ `.cc-slider-icon`, `.cc-value`, and
+the GTK `scale trough`/`highlight`/`slider` descendants); cards `.cc-pill` (+ `.cc-pill-icon`,
+`.cc-pill-label`, `.cc-chevron`) with the expandable `.cc-detail` / `.cc-detail-item`; the session
+row `.cc-actions` / `.cc-action`.
+
 ## Notifications (host popups)
 
 `.notifications` (the overlay stack); `.notification` (each popup) with the urgency modifier
