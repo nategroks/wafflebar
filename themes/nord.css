@@ -248,6 +248,100 @@ window#wafflebar {
     font-weight: bold;
 }
 
+/* control center: the bar button + the host-rendered quick-settings panel (header, sliders,
+ * Bluetooth/Wi-Fi cards, timers, session actions). */
+.controlcenter {
+    color: #d8dee9; /* recolors the bar button's symbolic glyph */
+}
+popover.controlcenter > contents,
+.controlcenter {
+    background-color: #2e3440;
+    color: #d8dee9;
+    border-radius: 12px;
+}
+.cc-time {
+    font-size: 28px;
+    font-weight: bold;
+    color: #eceff4;
+}
+.cc-date {
+    color: #81a1c1;
+}
+.cc-battery {
+    background-color: #3b4252;
+    color: #d8dee9;
+    border-radius: 8px;
+    padding: 2px 8px;
+}
+.cc-stats {
+    color: #4c566a;
+}
+.cc-stat {
+    color: #81a1c1;
+}
+/* sliders: frost icon, snow handle on a dim trough with a Frost highlight. */
+.cc-slider-icon {
+    color: #88c0d0;
+}
+.cc-value {
+    color: #d8dee9;
+    min-width: 42px;
+}
+.cc-slider scale trough {
+    background-color: #4c566a;
+    border-radius: 6px;
+    min-height: 5px;
+}
+.cc-slider scale highlight {
+    background-color: #88c0d0;
+    border-radius: 6px;
+}
+.cc-slider scale slider {
+    background-color: #eceff4;
+    border-radius: 50%;
+    min-width: 14px;
+    min-height: 14px;
+    margin: -5px;
+}
+/* pills (Bluetooth / Wi-Fi / timer cards) + their expandable detail. */
+.cc-pill {
+    background-color: #3b4252;
+    color: #d8dee9;
+    border-radius: 10px;
+    padding: 8px 10px;
+}
+.cc-pill:hover {
+    background-color: #434c5e;
+}
+.cc-pill-icon {
+    color: #88c0d0;
+}
+.cc-chevron {
+    color: #4c566a;
+}
+.cc-detail {
+    padding: 4px 6px;
+}
+.cc-detail-item {
+    background-color: #3b4252;
+    color: #d8dee9;
+    border-radius: 6px;
+    padding: 4px 8px;
+}
+.cc-detail-item:hover {
+    background-color: #434c5e;
+}
+/* session-action row: square buttons; power-off warms to the aurora red on hover. */
+.cc-action {
+    background-color: #3b4252;
+    color: #d8dee9;
+    border-radius: 8px;
+    padding: 8px;
+}
+.cc-action:hover {
+    background-color: #434c5e;
+}
+
 /* settings window — themed to match the apps menu (was previously native GTK). */
 .settings {
     background-color: #2e3440;

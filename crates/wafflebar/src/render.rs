@@ -13,8 +13,9 @@ use gtk4::{gdk, GestureClick, Orientation, Popover, Separator};
 use tracing::debug;
 use wafflebar_core::reconcile::child_key;
 use wafflebar_core::{
-    diff_children, ActionId, BluetoothCommand, ChildPatch, Event, Launch, ListPatch, MenuItem,
-    Plugin, Position, Reaction, SeparatorStyle, Topic, TrayCommand, View, VolumeCommand, WmCommand,
+    diff_children, ActionId, BluetoothCommand, BluetoothState, ChildPatch, Event, Launch, ListPatch,
+    MenuItem, NetworkState, Plugin, Position, Reaction, SeparatorStyle, Topic, TrayCommand, View,
+    VolumeCommand, WmCommand,
 };
 
 /// One placed module: its kind (for logging), the boxed reducer, and the host-owned container
@@ -56,6 +57,12 @@ pub struct Host {
     /// Latest default-sink `(percent, muted)` mirrored from `VolumeEvent`s, so the volume mixer
     /// popover can seed its slider with the current level when opened. `None` until the first event.
     volume_state: std::cell::Cell<Option<(u8, bool)>>,
+    /// Latest Bluetooth snapshot, mirrored from `Event::Bluetooth` so the control-center panel can
+    /// render the adapter + device list when opened. Default (absent) until the first event.
+    bluetooth_state: RefCell<BluetoothState>,
+    /// Latest network state, mirrored from `Event::Network` so the control-center panel can show the
+    /// Wi-Fi/wired readout when opened. `None` until the first event.
+    network_state: RefCell<Option<NetworkState>>,
 }
 
 impl Host {
@@ -82,6 +89,8 @@ impl Host {
             icon_size: std::cell::Cell::new(icon_size),
             menu: Rc::new(RefCell::new(crate::menu::MenuState::default())),
             volume_state: std::cell::Cell::new(None),
+            bluetooth_state: RefCell::new(BluetoothState::default()),
+            network_state: RefCell::new(None),
         })
     }
 
@@ -209,6 +218,43 @@ impl Host {
         (self.volume_sink)(&VolumeCommand::ToggleMute);
     }
 
+    /// The mirrored default-sink `(percent, muted)`, or `None` before the first audio event. Used by
+    /// the control-center panel to seed its volume slider on open.
+    pub fn volume_state(&self) -> Option<(u8, bool)> {
+        self.volume_state.get()
+    }
+
+    /// The latest Bluetooth snapshot (adapter + devices), default/absent before the first event.
+    pub fn bluetooth_state(&self) -> BluetoothState {
+        self.bluetooth_state.borrow().clone()
+    }
+
+    /// The latest network state, or `None` before the first event.
+    pub fn network_state(&self) -> Option<NetworkState> {
+        self.network_state.borrow().clone()
+    }
+
+    /// Issue a Bluetooth command (power/connect/disconnect) from the control-center panel.
+    pub fn send_bluetooth(&self, cmd: BluetoothCommand) {
+        (self.bluetooth_sink)(&cmd);
+    }
+
+    /// Attach the control-center panel popover to every `controlcenter` slot's container — the same
+    /// host-side pattern as the volume mixer (the panel needs GTK + the host's sinks/state, so it
+    /// can't ride in the reducer's `View`). Re-run after a structural rebuild (fresh containers).
+    pub fn attach_controlcenters(self: &Rc<Self>) {
+        let containers: Vec<gtk4::Box> = self
+            .slots
+            .borrow()
+            .iter()
+            .filter(|s| s.kind == "controlcenter")
+            .map(|s| s.container.clone())
+            .collect();
+        for container in containers {
+            crate::controlcenter::attach(self, &container);
+        }
+    }
+
     /// The effective icon pixel size for bar glyphs (see the `icon_size` field).
     pub fn icon_size(&self) -> u32 {
         self.icon_size.get()
@@ -256,6 +302,14 @@ impl Host {
                 / (wafflebar_core::VOLUME_NORM as u64))
                 .min(100) as u8;
             self.volume_state.set(Some((percent, *muted)));
+        }
+        // Mirror Bluetooth/network snapshots so the control-center panel can render them on open
+        // (the panel is host-rendered like the mixer; it reads these mirrors rather than holding a
+        // reducer of its own).
+        match ev {
+            Event::Bluetooth(state) => *self.bluetooth_state.borrow_mut() = state.clone(),
+            Event::Network(state) => *self.network_state.borrow_mut() = Some(state.clone()),
+            _ => {}
         }
         let n = self.slots.borrow().len();
         for i in 0..n {

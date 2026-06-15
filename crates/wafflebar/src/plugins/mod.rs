@@ -7,6 +7,7 @@
 pub mod appmenu;
 pub mod bluetooth;
 pub mod clock;
+pub mod controlcenter;
 pub mod cpu;
 pub mod dwl;
 pub mod feedblocks;
@@ -32,6 +33,7 @@ pub struct Caps {
 pub fn build(kind: &str, output: &str, cfg: &ModuleConfig, caps: &Caps) -> Box<dyn Plugin> {
     match kind {
         "appmenu" => Box::new(appmenu::AppMenu::new(cfg)),
+        "controlcenter" => Box::new(controlcenter::ControlCenter::new(cfg)),
         "clock" => Box::new(clock::Clock::new(cfg)),
         "tags" => Box::new(dwl::tags::Tags::new(output)),
         "layout" => Box::new(dwl::layout::Layout::new(output)),
@@ -77,6 +79,7 @@ pub fn catalog() -> Vec<PluginInfo> {
         |kind, name, description, icon, unique| PluginInfo { kind, name, description, icon, unique };
     vec![
         info("appmenu", "Applications", "A searchable menu of installed applications.", "view-app-grid-symbolic", false),
+        info("controlcenter", "Control center", "Quick-settings flyout: volume/mic/brightness sliders, Bluetooth + Wi-Fi, timers, and session actions.", "preferences-system-symbolic", true),
         info("clock", "Clock", "Date and time.", "preferences-system-time-symbolic", false),
         info("launcher", "Launcher", "Pinned application shortcuts.", "applications-other-symbolic", false),
         info("separator", "Separator", "Blank space, a line, or a grip; can expand to push items apart.", "view-list-symbolic", false),

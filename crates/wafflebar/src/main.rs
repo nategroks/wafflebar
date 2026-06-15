@@ -6,10 +6,12 @@
 
 mod app;
 mod config_reload;
+mod controlcenter;
 mod dropdown;
 mod event_loop;
 mod feeds;
 mod menu;
+mod sysinfo;
 mod notify;
 mod notify_ui;
 mod plugins;

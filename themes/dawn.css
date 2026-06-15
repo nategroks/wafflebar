@@ -238,6 +238,96 @@ window#wafflebar {
     margin-bottom: 4px;
 }
 
+/* control center — light counterpart to Nord; same structure, Solarized-light colors. */
+.controlcenter {
+    color: #657b83;
+}
+popover.controlcenter > contents,
+.controlcenter {
+    background-color: #fdf6e3;
+    color: #657b83;
+    border-radius: 12px;
+}
+.cc-time {
+    font-size: 28px;
+    font-weight: bold;
+    color: #586e75;
+}
+.cc-date {
+    color: #268bd2;
+}
+.cc-battery {
+    background-color: #eee8d5;
+    color: #657b83;
+    border-radius: 8px;
+    padding: 2px 8px;
+}
+.cc-stats {
+    color: #93a1a1;
+}
+.cc-stat {
+    color: #268bd2;
+}
+.cc-slider-icon {
+    color: #2aa198;
+}
+.cc-value {
+    color: #657b83;
+    min-width: 42px;
+}
+.cc-slider scale trough {
+    background-color: #93a1a1;
+    border-radius: 6px;
+    min-height: 5px;
+}
+.cc-slider scale highlight {
+    background-color: #2aa198;
+    border-radius: 6px;
+}
+.cc-slider scale slider {
+    background-color: #fdf6e3;
+    border-radius: 50%;
+    min-width: 14px;
+    min-height: 14px;
+    margin: -5px;
+}
+.cc-pill {
+    background-color: #eee8d5;
+    color: #657b83;
+    border-radius: 10px;
+    padding: 8px 10px;
+}
+.cc-pill:hover {
+    background-color: #e3dcc7;
+}
+.cc-pill-icon {
+    color: #2aa198;
+}
+.cc-chevron {
+    color: #93a1a1;
+}
+.cc-detail {
+    padding: 4px 6px;
+}
+.cc-detail-item {
+    background-color: #eee8d5;
+    color: #657b83;
+    border-radius: 6px;
+    padding: 4px 8px;
+}
+.cc-detail-item:hover {
+    background-color: #e3dcc7;
+}
+.cc-action {
+    background-color: #eee8d5;
+    color: #657b83;
+    border-radius: 8px;
+    padding: 8px;
+}
+.cc-action:hover {
+    background-color: #e3dcc7;
+}
+
 /* notifications — same 3px left accent shape as Nord; only the colors differ. */
 .notifications {
     padding: 4px;

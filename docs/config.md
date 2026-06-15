@@ -78,8 +78,32 @@ module, is a hard error with a clear message.
 | `pulseaudio` | 🔜 M3 | volume |
 | `tray` | 🔜 M3 | StatusNotifierItem |
 | `launcher` | 🔜 M3 | opens wofi |
+| `controlcenter` | ✅ | Quick-settings flyout button; `icon` (theme name or PNG/SVG path), `label` (optional text). See below. |
 
 Module types that aren't implemented yet render a dim placeholder labelled with their type.
+
+#### `controlcenter`
+
+A bar button that opens a quick-settings panel (the macOS/GNOME-style flyout): a header with the
+clock/date, battery, and live power-draw/temperature/brightness stats; sliders for **volume**
+(the audio backend), **microphone** (`wpctl`), **brightness** (`brightnessctl`/sysfs), the **CPU
+power cap** (`intel-rapl` powercap, in watts), and the **battery charge limit**
+(`charge_control_end_threshold`); expandable **Bluetooth** and **Wi-Fi** cards; a **stopwatch** and a
+**countdown** timer; and a row of session actions (lock / suspend / reboot / power off via
+`loginctl`/`systemctl`).
+
+Each control reads live state and **hides itself when its backing mechanism is absent** (no
+backlight, no `wpctl`, no `intel-rapl`, no charge threshold) — so the panel only ever shows controls
+that actually do something on your hardware. The button subscribes to the audio/Bluetooth/network
+backends, so adding it starts them (each "needs a restart" like the other backend modules).
+
+```toml
+[[modules]]
+type = "controlcenter"
+align = "end"
+# icon = "preferences-system-symbolic"   # default; a theme name or a PNG/SVG path
+# label = ""                              # optional text beside the icon
+```
 
 ### Icons
 
