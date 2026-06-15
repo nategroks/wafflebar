@@ -14,6 +14,7 @@ pub mod feedblocks;
 pub mod launcher;
 pub mod memory;
 pub mod network;
+pub mod power;
 pub mod separator;
 pub mod showdesktop;
 pub mod statustray;
@@ -48,6 +49,7 @@ pub fn build(kind: &str, output: &str, cfg: &ModuleConfig, caps: &Caps) -> Box<d
         "cpu" => Box::new(cpu::Cpu::new()),
         "statustray" => Box::new(statustray::StatusTray::new()),
         "bluetooth" => Box::new(bluetooth::Bluetooth::new()),
+        "power" => Box::new(power::Power::new(cfg)),
         "feedblocks" => Box::new(feedblocks::FeedBlocks::new(cfg)),
         other => Box::new(Placeholder::new(other)),
     }
@@ -94,6 +96,7 @@ pub fn catalog() -> Vec<PluginInfo> {
         info("network", "Network", "Connection status. Starting its backend needs a restart.", "network-wireless-symbolic", false),
         info("statustray", "System tray", "Status-notifier icons from running apps.", "preferences-system-notifications-symbolic", true),
         info("bluetooth", "Bluetooth", "Adapter power + paired devices. Starting its backend needs a restart.", "bluetooth-symbolic", true),
+        info("power", "Power", "Sign out, hibernate, reboot, or shut down.", "system-shutdown-symbolic", false),
         info("feedblocks", "Feed blocks", "Render someblocks-style external status blocks (natewm-mode channel 2).", "view-list-symbolic", true),
     ]
 }
