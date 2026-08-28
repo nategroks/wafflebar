@@ -1,0 +1,404 @@
+#!/usr/bin/env python3
+"""Keep wlroots outputs in a fixed left-to-right order, whatever port they are plugged into.
+
+WHY THIS EXISTS
+---------------
+Connector names (DP-1, HDMI-A-1) are assigned by *port*, not by display: move a cable between two
+ports and the names swap. wlroots compositors also add outputs to the layout in the order they are
+announced, so plug order silently becomes screen order. Anything keyed on connector names — a
+kanshi profile, a hardcoded position — follows the port rather than the screen.
+
+So this keys on EDID identity (make, model, serial) and recomputes the layout from a ranked list
+every time the output set changes. Same displays, same arrangement, regardless of which socket
+each cable is in and which order they came up.
+
+CONFIG  ~/.config/wafflebar/monitors.toml
+
+    [policy]
+    align   = "top"      # top | center | bottom — how displays of differing heights line up
+    unknown = "append"   # append | disable — what to do with a display not listed below
+
+    [[display]]
+    rank   = 1           # 1 = left-most
+    make   = "Dell Inc."
+    model  = "DELL U2723QE"
+    serial = "ABC123"    # any of the three may be omitted; those given must all match
+    mode   = "3840x2160@60"
+    scale  = 1.5
+
+Run `wb-monitors --identify` to print the identity strings your displays actually report, and paste
+them in. Matching is exact but case-insensitive, and a field you omit is a wildcard.
+
+USAGE
+    wb-monitors --identify        list connected outputs and their EDID identity
+    wb-monitors --once            apply the layout once
+    wb-monitors --once --dry-run  print what would change, touch nothing
+    wb-monitors --watch           apply, then re-apply whenever the output set changes
+"""
+
+import argparse
+import json
+import os
+import shutil
+import subprocess
+import sys
+import time
+
+try:
+    import tomllib  # 3.11+
+except ModuleNotFoundError:  # pragma: no cover - older interpreters
+    tomllib = None
+
+DEFAULT_CONFIG = os.path.join(
+    os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config")),
+    "wafflebar",
+    "monitors.toml",
+)
+
+
+# ---------------------------------------------------------------- discovery --
+
+
+def wlr_randr(args):
+    """Run wlr-randr, returning stdout. Raises RuntimeError with the tool's own message."""
+    exe = shutil.which("wlr-randr")
+    if not exe:
+        raise RuntimeError("wlr-randr not found — install it (wlroots output management client)")
+    proc = subprocess.run([exe] + args, capture_output=True, text=True)
+    if proc.returncode != 0:
+        raise RuntimeError(f"wlr-randr {' '.join(args)} failed: {proc.stderr.strip()}")
+    return proc.stdout
+
+
+def parse_text(text):
+    """Parse wlr-randr's human-readable listing.
+
+    wlr-randr only grew `--json` in 0.4.0, and distributions still ship 0.3.x (Ubuntu 24.04 does).
+    Rather than making the tool useless there, fall back to the plain listing:
+
+        HEADLESS-1 "Headless output 1"
+          Make: (null)
+          Enabled: yes
+          Modes:
+            1920x1080 px, 60.000000 Hz (current)
+          Position: 0,0
+          Scale: 1.000000
+    """
+    result, cur = [], None
+    for raw in text.splitlines():
+        if not raw.strip():
+            continue
+        if not raw.startswith(" "):
+            if cur:
+                result.append(cur)
+            name = raw.split(None, 1)[0]
+            cur = {"name": name, "make": "", "model": "", "serial": "", "enabled": False,
+                   "w": 0, "h": 0, "refresh": 0.0, "x": 0, "y": 0, "scale": 1.0, "modes": []}
+            continue
+        if cur is None:
+            continue
+        line = raw.strip()
+        for field, key in (("Make:", "make"), ("Model:", "model"), ("Serial:", "serial")):
+            if line.startswith(field):
+                value = line[len(field):].strip()
+                # wlr-randr prints "(null)" for an EDID field the display does not supply.
+                cur[key] = "" if value in ("(null)", "") else value
+        if line.startswith("Enabled:"):
+            cur["enabled"] = line.split(":", 1)[1].strip() == "yes"
+        elif line.startswith("Position:"):
+            pos = line.split(":", 1)[1].strip()
+            xs, _, ys = pos.partition(",")
+            cur["x"], cur["y"] = int(xs), int(ys)
+        elif line.startswith("Scale:"):
+            cur["scale"] = float(line.split(":", 1)[1].strip())
+        elif "px" in line and "x" in line.split("px")[0]:
+            res = line.split("px")[0].strip()
+            w, _, h = res.partition("x")
+            try:
+                mode = {"width": int(w), "height": int(h),
+                        "current": "(current)" in line, "preferred": "preferred" in line}
+            except ValueError:
+                continue
+            if "Hz" in line:
+                hz = line.split(",")[1].strip().split()[0]
+                try:
+                    mode["refresh"] = float(hz)
+                except ValueError:
+                    pass
+            cur["modes"].append(mode)
+            if mode["current"]:
+                cur["w"], cur["h"] = mode["width"], mode["height"]
+                cur["refresh"] = mode.get("refresh", 0.0)
+    if cur:
+        result.append(cur)
+    for o in result:
+        if not o["w"]:
+            pref = next((m for m in o["modes"] if m.get("preferred")), None) or (o["modes"][0] if o["modes"] else None)
+            if pref:
+                o["w"], o["h"] = pref["width"], pref["height"]
+    return result
+
+
+def outputs():
+    """Current outputs as dicts: name, make, model, serial, enabled, w, h, x, y, scale, modes."""
+    try:
+        raw = wlr_randr(["--json"])
+    except RuntimeError as e:
+        if "unrecognized option" not in str(e) and "--json" not in str(e):
+            raise
+        return parse_text(wlr_randr([]))
+    data = json.loads(raw)
+    result = []
+    for o in data:
+        current = next((m for m in o.get("modes", []) if m.get("current")), None)
+        preferred = next((m for m in o.get("modes", []) if m.get("preferred")), None)
+        mode = current or preferred or {}
+        pos = o.get("position") or {}
+        result.append(
+            {
+                "name": o.get("name", ""),
+                "make": (o.get("make") or "").strip(),
+                "model": (o.get("model") or "").strip(),
+                "serial": (o.get("serial") or "").strip(),
+                "enabled": bool(o.get("enabled")),
+                "w": int(mode.get("width", 0)),
+                "h": int(mode.get("height", 0)),
+                "refresh": float(mode.get("refresh", 0.0)),
+                "x": int(pos.get("x", 0)),
+                "y": int(pos.get("y", 0)),
+                "scale": float(o.get("scale", 1.0) or 1.0),
+                "modes": o.get("modes", []),
+            }
+        )
+    return result
+
+
+def identity(o):
+    return (o["make"], o["model"], o["serial"])
+
+
+def identity_str(o):
+    parts = [p for p in identity(o) if p]
+    return " ".join(parts) if parts else f"<no EDID: {o['name']}>"
+
+
+# ------------------------------------------------------------------- config --
+
+
+def load_config(path):
+    if not os.path.exists(path):
+        return {"policy": {"align": "top", "unknown": "append"}, "display": []}
+    if tomllib is None:
+        raise RuntimeError("python3.11+ (tomllib) is required to read the config")
+    with open(path, "rb") as fh:
+        cfg = tomllib.load(fh)
+    cfg.setdefault("policy", {})
+    cfg["policy"].setdefault("align", "top")
+    cfg["policy"].setdefault("unknown", "append")
+    cfg.setdefault("display", [])
+    for i, d in enumerate(cfg["display"]):
+        if "rank" not in d:
+            raise RuntimeError(f"[[display]] #{i + 1} has no rank")
+    return cfg
+
+
+def matches(rule, o):
+    """A rule matches when every field it names matches, case-insensitively."""
+    for field in ("make", "model", "serial"):
+        want = rule.get(field)
+        if want is None:
+            continue
+        if str(want).strip().lower() != o[field].lower():
+            return False
+    # A rule that names nothing matches nothing — it would otherwise claim every display.
+    return any(rule.get(f) is not None for f in ("make", "model", "serial"))
+
+
+# -------------------------------------------------------------------- plan ---
+
+
+def parse_mode(spec):
+    """'3840x2160@60' -> (3840, 2160, 60.0); '3840x2160' -> (3840, 2160, None)."""
+    res, _, refresh = spec.partition("@")
+    w, _, h = res.lower().partition("x")
+    return int(w), int(h), (float(refresh) if refresh else None)
+
+
+def plan(cfg, live):
+    """Return (ordered list of desired output states, notes)."""
+    policy = cfg["policy"]
+    notes = []
+
+    ranked, unknown = [], []
+    for o in live:
+        rule = next((r for r in cfg["display"] if matches(r, o)), None)
+        if rule:
+            ranked.append((int(rule["rank"]), o, rule))
+        else:
+            unknown.append(o)
+
+    # Deterministic order for unlisted displays: identity, then connector. Never arrival order —
+    # that is exactly the plug-order dependence this tool exists to remove.
+    unknown.sort(key=lambda o: (o["make"].lower(), o["model"].lower(), o["serial"].lower(), o["name"]))
+    ranked.sort(key=lambda t: (t[0], t[1]["name"]))
+
+    desired = []
+    for rank, o, rule in ranked:
+        desired.append((o, rule))
+    if policy["unknown"] == "append":
+        desired.extend((o, {}) for o in unknown)
+    else:
+        for o in unknown:
+            notes.append(f"disabling unlisted display {identity_str(o)} ({o['name']})")
+
+    # Safety: never end with nothing enabled. A config that lists only displays which are all
+    # currently unplugged must not black out the machine.
+    if not desired:
+        notes.append("no configured display is connected; enabling everything present, in order")
+        desired = [(o, {}) for o in sorted(live, key=lambda o: o["name"])]
+
+    # Resolve modes and scales first: the x offsets depend on the *logical* widths.
+    resolved = []
+    for o, rule in desired:
+        w, h, refresh = o["w"], o["h"], None
+        if rule.get("mode"):
+            w, h, refresh = parse_mode(rule["mode"])
+        scale = float(rule.get("scale", o["scale"] or 1.0))
+        resolved.append(
+            {
+                "name": o["name"],
+                "ident": identity_str(o),
+                "w": w,
+                "h": h,
+                "refresh": refresh,
+                "scale": scale,
+                "logical_w": int(round(w / scale)) if scale else w,
+                "logical_h": int(round(h / scale)) if scale else h,
+                "mode_spec": rule.get("mode"),
+                "was": (o["x"], o["y"], o["scale"], o["enabled"]),
+            }
+        )
+
+    tallest = max((r["logical_h"] for r in resolved), default=0)
+    x = 0
+    for r in resolved:
+        r["x"] = x
+        if policy["align"] == "center":
+            r["y"] = (tallest - r["logical_h"]) // 2
+        elif policy["align"] == "bottom":
+            r["y"] = tallest - r["logical_h"]
+        else:
+            r["y"] = 0
+        x += r["logical_w"]
+
+    disabled = [o for o in live if o["name"] not in {r["name"] for r in resolved}]
+    return resolved, disabled, notes
+
+
+def build_args(resolved, disabled):
+    args = []
+    for r in resolved:
+        args += ["--output", r["name"], "--on"]
+        if r["mode_spec"]:
+            spec = f"{r['w']}x{r['h']}"
+            if r["refresh"]:
+                spec += f"@{r['refresh']}"
+            args += ["--mode", spec]
+        args += ["--pos", f"{r['x']},{r['y']}", "--scale", f"{r['scale']:g}"]
+    for o in disabled:
+        args += ["--output", o["name"], "--off"]
+    return args
+
+
+def already_applied(resolved, disabled, live):
+    by_name = {o["name"]: o for o in live}
+    for r in resolved:
+        o = by_name.get(r["name"])
+        if not o or not o["enabled"]:
+            return False
+        if (o["x"], o["y"]) != (r["x"], r["y"]):
+            return False
+        if abs(o["scale"] - r["scale"]) > 1e-6:
+            return False
+        if r["mode_spec"] and (o["w"], o["h"]) != (r["w"], r["h"]):
+            return False
+    return all(not by_name[o["name"]]["enabled"] for o in disabled if o["name"] in by_name)
+
+
+# -------------------------------------------------------------------- main ---
+
+
+def apply_once(cfg, dry_run=False, quiet=False):
+    live = outputs()
+    if not live:
+        if not quiet:
+            print("no outputs reported")
+        return False
+    resolved, disabled, notes = plan(cfg, live)
+    for n in notes:
+        print(f"note: {n}")
+    if already_applied(resolved, disabled, live):
+        if not quiet:
+            print("layout already correct; nothing to do")
+        return False
+    for r in resolved:
+        print(f"  {r['name']:<12} {r['ident']:<34} -> {r['w']}x{r['h']} @ {r['x']},{r['y']} scale {r['scale']:g}")
+    for o in disabled:
+        print(f"  {o['name']:<12} {identity_str(o):<34} -> off")
+    args = build_args(resolved, disabled)
+    if dry_run:
+        print("dry run; would run: wlr-randr " + " ".join(args))
+        return False
+    wlr_randr(args)
+    return True
+
+
+def main():
+    ap = argparse.ArgumentParser(description="Deterministic wlroots output ordering by EDID identity")
+    ap.add_argument("--config", default=DEFAULT_CONFIG)
+    ap.add_argument("--identify", action="store_true", help="print each output's EDID identity")
+    ap.add_argument("--once", action="store_true", help="apply once and exit")
+    ap.add_argument("--watch", action="store_true", help="apply, then re-apply on every change")
+    ap.add_argument("--interval", type=float, default=2.0, help="poll seconds for --watch")
+    ap.add_argument("--dry-run", action="store_true")
+    args = ap.parse_args()
+
+    try:
+        if args.identify:
+            for o in outputs():
+                state = "on " if o["enabled"] else "off"
+                print(f"{o['name']:<12} {state} {o['w']}x{o['h']}+{o['x']}+{o['y']}  "
+                      f"make={o['make']!r} model={o['model']!r} serial={o['serial']!r}")
+            return 0
+
+        cfg = load_config(args.config)
+        if args.once or not args.watch:
+            apply_once(cfg, dry_run=args.dry_run)
+            return 0
+
+        # Watch: poll the output set. wlr-output-management has no shell-level event stream, and a
+        # 2s poll costs a JSON parse — cheap enough, and it also catches a compositor that changed
+        # the layout behind our back. Re-reads the config each pass so an edit takes effect without
+        # a restart.
+        last = None
+        while True:
+            try:
+                cfg = load_config(args.config)
+                fingerprint = [(o["name"], identity(o), o["enabled"], o["w"], o["h"], o["x"], o["y"])
+                               for o in outputs()]
+                if fingerprint != last:
+                    apply_once(cfg, dry_run=args.dry_run, quiet=True)
+                    last = [(o["name"], identity(o), o["enabled"], o["w"], o["h"], o["x"], o["y"])
+                            for o in outputs()]
+            except RuntimeError as e:
+                print(f"wb-monitors: {e}", file=sys.stderr)
+            time.sleep(args.interval)
+    except RuntimeError as e:
+        print(f"wb-monitors: {e}", file=sys.stderr)
+        return 1
+    except KeyboardInterrupt:
+        return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

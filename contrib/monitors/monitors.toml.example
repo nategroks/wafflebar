@@ -1,0 +1,29 @@
+# Deterministic display order for wb-monitors. Copy to ~/.config/wafflebar/monitors.toml.
+#
+# Fill in the identity strings from `wb-monitors --identify` — do not type them from the display's
+# on-screen menu, they often differ. Any of make/model/serial may be omitted; the ones you give must
+# all match. Identity is EDID, never the connector name, because connector names follow the PORT: a
+# cable moved from one DisplayPort socket to another renames the output and would reorder a
+# connector-keyed config.
+
+[policy]
+align   = "top"       # top | center | bottom — how displays of differing heights line up
+unknown = "append"    # append | disable — a display not listed below
+
+[[display]]
+rank   = 1            # 1 = left-most
+make   = "Dell Inc."
+model  = "DELL U2723QE"
+serial = "ABC123"
+mode   = "3840x2160@60"
+scale  = 1.5
+
+[[display]]
+rank   = 2
+make   = "LG Electronics"
+model  = "LG HDR 4K"
+serial = "DEF456"
+
+# [[display]]
+# rank  = 3
+# model = "0x1234"    # a laptop panel often reports only a model code and no serial

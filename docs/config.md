@@ -17,7 +17,7 @@ schema = 1     # required-ish; defaults to the current version if omitted
 
 | Key | Type | Default | Meaning |
 |-----|------|---------|---------|
-| `monitor` | string | `"primary"` | `"primary"`/`"left"`/`"center"`/`"right"` (by layout position — survives NVIDIA connector renaming), `"all"` (one bar per monitor), or an exact connector (`DP-1`) / model name |
+| `monitor` | string | `"primary"` | `"primary"`/`"left"`/`"center"`/`"right"` (by layout position — survives NVIDIA connector renaming), `"all"` (one bar per monitor), or an exact connector (`DP-1`) / model name. Re-evaluated on hotplug: bars appear on new outputs and vanish with departed ones, and a positional selection moves when the layout changes (a new left-most display, say). Ordering is total — `x`, then `y`, then connector — so it never depends on the order the compositor announced outputs in. See `crates/wafflebar-core/src/outputs.rs`. |
 | `position` | `"top"` \| `"bottom"` | `"top"` | which screen edge the bar docks to |
 | `layout` | `"pack"` \| `"grid"` | `"pack"` | how modules are arranged — see below |
 | `height` | integer | `26` | bar thickness in px (also the layer-shell exclusive zone) |
@@ -28,7 +28,7 @@ schema = 1     # required-ish; defaults to the current version if omitted
 | `reserve_space` | bool | `true` | reserve screen space (strut) so tiled windows avoid the bar; `false` lets windows extend under it |
 | `keep_below` | bool | `false` | keep the bar below normal windows (layer `Bottom`) instead of above (`Top`) |
 | `lock` | bool | `false` | lock the layout — Settings disables drag-reorder / add / remove (field edits still work) |
-| `theme` | string | _(built-in Nord)_ | path to a GTK4 CSS file |
+| `theme` | string | _(built-in Nord)_ | a built-in name — `nord`, `dawn`, `workbench`, `cde` — or a path to a GTK4 CSS file |
 
 ### `layout` — pack vs grid
 

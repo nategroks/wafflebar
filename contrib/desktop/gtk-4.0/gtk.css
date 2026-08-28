@@ -1,0 +1,117 @@
+/* Workbench/CDE look for GTK4 apps. Installed to ~/.config/gtk-4.0/gtk.css.
+ *
+ * Same grammar as themes/workbench.css: flat faces, zero radius, 2px hard bevels (light top+left,
+ * dark bottom+right, inverted when pressed), inset wells, no animation.
+ *
+ * For the CDE palette instead, swap: #a0a0a0→#aeb2c3  #d0d0d0→#d3d6e0  #262626→#6c7080
+ *                                    #8c8c8c→#9296a8  #6688bb→#a83e7a  #b0b0b0→#bcc0cf
+ *
+ * KNOWN LIMIT: this styles plain GTK4 apps; GTK3 apps read the gtk-3.0 sibling of this file. An
+ * app built on libadwaita ignores user themes for its own widgets entirely, so those windows stay
+ * round no matter what is written here — that is a libadwaita policy, not a mistake in this file. */
+
+@define-color theme_bg_color #a0a0a0;
+@define-color theme_base_color #8c8c8c;
+@define-color theme_fg_color #000000;
+@define-color theme_text_color #000000;
+@define-color theme_selected_bg_color #6688bb;
+@define-color theme_selected_fg_color #ffffff;
+@define-color borders #262626;
+
+* {
+    border-radius: 0;
+    box-shadow: none;
+    text-shadow: none;
+    transition: none;
+}
+
+window, dialog, .background, popover, menu, notebook, box, paned {
+    background-color: #a0a0a0;
+    color: #000000;
+    font-family: "Tengoku", "Hurmit Nerd Font Mono", monospace;
+    font-size: 12px;
+}
+
+button, spinbutton button, combobox button, headerbar button {
+    border-style: solid;
+    border-width: 2px;
+    border-top-color: #d0d0d0;
+    border-left-color: #d0d0d0;
+    border-right-color: #262626;
+    border-bottom-color: #262626;
+    background-image: none;
+    background-color: #a0a0a0;
+    color: #000000;
+    padding: 2px 8px;
+    min-height: 0;
+}
+button:hover { background-color: #b0b0b0; }
+button:active, button:checked {
+    border-top-color: #262626;
+    border-left-color: #262626;
+    border-right-color: #d0d0d0;
+    border-bottom-color: #d0d0d0;
+    background-color: #8c8c8c;
+}
+button:focus { outline: 1px dotted #000000; outline-offset: -4px; }
+
+entry, textview, treeview.view, spinbutton {
+    border-style: solid;
+    border-width: 2px;
+    border-top-color: #262626;
+    border-left-color: #262626;
+    border-right-color: #d0d0d0;
+    border-bottom-color: #d0d0d0;
+    background-image: none;
+    background-color: #8c8c8c;
+    color: #000000;
+    padding: 2px 4px;
+}
+
+/* Title bars: a solid band with square gadgets, the way Workbench and CDE draw them. */
+headerbar, .titlebar {
+    background-image: none;
+    background-color: #6688bb;
+    color: #ffffff;
+    border-bottom: 2px solid #262626;
+    min-height: 0;
+    padding: 2px 4px;
+}
+headerbar:backdrop, .titlebar:backdrop {
+    background-color: #a0a0a0;
+    color: #000000;
+}
+headerbar .title { font-weight: bold; color: inherit; }
+
+popover > contents, .menu {
+    background-color: #a0a0a0;
+    border: 1px solid #262626;
+    padding: 2px;
+}
+modelbutton { padding: 2px 10px; border-radius: 0; }
+modelbutton:hover, row:selected { background-color: #6688bb; color: #ffffff; }
+
+/* Scrollbars: an inset trough with a raised square thumb — no floating overlay pills. */
+scrollbar { background-color: #8c8c8c; border: none; }
+scrollbar slider {
+    border-style: solid;
+    border-width: 2px;
+    border-top-color: #d0d0d0;
+    border-left-color: #d0d0d0;
+    border-right-color: #262626;
+    border-bottom-color: #262626;
+    background-color: #a0a0a0;
+    min-width: 12px;
+    min-height: 12px;
+    margin: 0;
+}
+
+selection, :selected { background-color: #6688bb; color: #ffffff; }
+tooltip, tooltip.background {
+    background-color: #d0d0d0;
+    color: #000000;
+    border: 1px solid #262626;
+}
+progressbar trough { background-color: #8c8c8c; border: 2px solid #262626; }
+progressbar progress { background-color: #6688bb; }
+separator { background-color: #262626; min-width: 1px; min-height: 1px; }

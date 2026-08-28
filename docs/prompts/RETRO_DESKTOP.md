@@ -4,6 +4,19 @@ Paste this file (or one `## Task` section at a time — they are independent) to
 wafflebar repo root. It is written to be handed over verbatim; everything it asserts about this repo
 was checked against the tree at the time of writing, with file:line anchors so drift is visible.
 
+> **Status — mostly executed.** This started as a hand-off prompt and was then carried out in the
+> same branch. What landed: `themes/workbench.css` + `themes/cde.css` (registered as built-ins in
+> `crates/wafflebar/src/theme.rs`), `themes/workbench-preset.toml`, the GTK/X11/dwl configs under
+> `contrib/desktop/`, the EDID-ordered display daemon `contrib/monitors/wb-monitors` with its
+> tests, hotplug reconciliation in `crates/wafflebar/src/app.rs` over the new
+> `crates/wafflebar-core/src/outputs.rs`, the bundled font plus `scripts/install-fonts.sh`, and
+> `scripts/install-desktop.sh` to apply the lot. What did **not**: the dwl side is a snippet
+> (`contrib/desktop/dwl-colors.h`) because `natewm-asm` is a separate repository, Qt styling is
+> written up rather than shipped as a file, and the hardware gates below (a real cable swap, a
+> physical unplug, a reboot) can only be closed on the actual desk. Sections still phrased as
+> instructions are the specification the code was written against — read them as the contract, and
+> as the brief for the parts that remain.
+
 ---
 
 ## 0. The look we are copying
@@ -50,15 +63,16 @@ Plus `themes/workbench-preset.toml`: a ready `config.toml` with the geometry the
 | Role | Hex | Used for |
 |---|---|---|
 | face | `#a0a0a0` | bar surface (`#grid`), module boxes |
-| face-light | `#c8c8c8` | raised bevel top/left |
-| face-dark | `#000000` | raised bevel bottom/right (Workbench bevels are pure black) |
+| face-light | `#d0d0d0` | raised bevel top/left |
+| face-dark | `#262626` | raised bevel bottom/right |
+| face-hover | `#b0b0b0` | the only hover affordance — one step, no fade |
 | well | `#8c8c8c` | inset content recesses |
 | text | `#000000` | all label text |
 | text-inv | `#ffffff` | text on the accent band |
 | accent | `#6688bb` | active tag / focused task / title band |
-| warn | `#ee8822` | `.high` |
-| alert | `#dd4422` | `.critical`, `.urgent` |
-| ok | `#55aa77` | `.low` / nominal |
+| dim | `#6a6a6a` | empty tags, secondary text |
+| warn / alert / ok | `#ee8822` / `#dd4422` / `#55aa77` | bucket **bands** (urgent tag, tray attention) |
+| warn-text / alert-text / ok-text | `#8a4a00` / `#a01f0e` / `#1f6b3a` | bucket **label text** — the bright hues wash out on the `#8c8c8c` well |
 
 **CDE / Motif**
 
@@ -67,13 +81,14 @@ Plus `themes/workbench-preset.toml`: a ready `config.toml` with the geometry the
 | face | `#aeb2c3` | bar surface, module boxes |
 | face-light | `#d3d6e0` | raised bevel top/left |
 | face-dark | `#6c7080` | raised bevel bottom/right |
+| face-hover | `#bcc0cf` | hover, one step |
 | well | `#9296a8` | inset recesses |
 | text | `#000000` | label text |
-| text-inv | `#ffffff` | text on the accent band |
+| text-inv | `#ffffff` | text on the accent band (and on the dark `urgent` tag) |
 | accent | `#a83e7a` | active title band, active tag (the Help Viewer magenta) |
-| warn | `#c07a1e` | `.high` |
-| alert | `#a5202a` | `.critical`, `.urgent` |
-| ok | `#4a7a4a` | `.low` / nominal |
+| dim | `#7a7e8c` | empty tags, secondary text |
+| warn / alert / ok | `#c07a1e` / `#a5202a` / `#4a7a4a` | bucket **bands** |
+| warn-text / alert-text / ok-text | `#7a4a10` / `#8a1a22` / `#1f5c33` | bucket **label text** on the `#9296a8` well |
 
 ### A3. The bevel, in GTK4 CSS
 

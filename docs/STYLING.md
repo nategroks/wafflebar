@@ -8,6 +8,14 @@ Theming model: `bar.theme = "nord"` selects a built-in theme (or a `/path.css`);
 `$XDG_CONFIG_HOME/wafflebar/theme.css` layers on top (at `PRIORITY_USER`, above the theme). Both
 hot-reload. See `docs/UPSTREAM.md`.
 
+Built-in themes: **nord** (the reference), **dawn**, and the two retro themes **workbench** (Amiga
+Workbench 3.1 — grey face, blue accent) and **cde** (CDE/Motif — blue-grey face, magenta accent).
+The retro pair shares one grammar — flat faces, `border-radius: 0`, 2px hard bevels that invert when
+pressed, inset wells, chisel separators — and the two are palette-swaps of each other, so a change to
+one belongs in both. They also style GTK *state* selectors explicitly (`:hover`, `:active`,
+`:checked`, `:disabled`, `:focus`): Adwaita reasserts `background-image` / `box-shadow` /
+`transition` per state, so a state left unstyled comes back rounded and animated.
+
 ## Structure (the host)
 
 | Selector | Conveys |

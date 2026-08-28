@@ -1,0 +1,16 @@
+[Unit]
+Description=Deterministic display ordering for wlroots (wafflebar)
+Documentation=file:%h/.config/wafflebar/monitors.toml
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+Type=simple
+# --watch re-applies whenever the output set changes, so a cable moved between ports puts the
+# desktop back in the configured order without a login.
+ExecStart=%h/.local/bin/wb-monitors --watch
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=graphical-session.target

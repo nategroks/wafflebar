@@ -1,0 +1,26 @@
+! Workbench/CDE look for X11 / XWayland apps (xterm, xmessage, older Motif programs).
+! Installed to ~/.Xresources; load with `xrdb -merge ~/.Xresources` at session start.
+!
+! Tengoku is a TrueType face, so X clients reach it through Xft. Core-font-only clients (very old
+! Motif programs) fall back to fixed — that is expected, not a misconfiguration.
+
+*background:            #a0a0a0
+*foreground:            #000000
+*borderColor:           #262626
+*highlightColor:        #6688bb
+*cursorColor:           #000000
+
+XTerm*background:       #8c8c8c
+XTerm*foreground:       #000000
+XTerm*faceName:         Tengoku
+XTerm*faceSize:         9
+XTerm*internalBorder:   4
+XTerm*scrollBar:        true
+XTerm*rightScrollBar:   true
+
+! Motif-era resources still honoured by lesstif/openmotif apps.
+*XmForm.background:     #a0a0a0
+*XmLabel.foreground:    #000000
+*XmTextField.background: #8c8c8c
+*shadowThickness:       2
+*highlightThickness:    1

@@ -414,6 +414,26 @@ mod tests {
         assert_eq!(cfg.modules[1].align, Align::End, "clock packs right");
     }
 
+    /// Every preset TOML this repo ships must parse against the current schema. A preset is
+    /// documentation users paste in wholesale — a stale key or a bad module `type` there is a
+    /// broken bar on first launch, and nothing else in the tree reads these files.
+    #[test]
+    fn shipped_presets_parse() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../themes");
+        let mut checked = 0;
+        for entry in std::fs::read_dir(&dir).expect("themes/ exists") {
+            let path = entry.expect("readable entry").path();
+            if path.extension().and_then(|e| e.to_str()) != Some("toml") {
+                continue;
+            }
+            let cfg = Config::load(&path)
+                .unwrap_or_else(|e| panic!("{} does not parse: {e}", path.display()));
+            assert!(!cfg.modules.is_empty(), "{} declares no modules", path.display());
+            checked += 1;
+        }
+        assert!(checked >= 2, "expected the shipped presets, found {checked}");
+    }
+
     #[test]
     fn icon_size_auto_derives_from_height_else_explicit() {
         let mut bar = BarConfig::default(); // icon_size = 0 (auto), height = 26

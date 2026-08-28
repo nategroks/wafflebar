@@ -1,0 +1,712 @@
+/* wafflebar — CDE theme. GTK4 CSS.
+ *
+ * CDE/Motif: a blue-grey face, chiselled bevels, the Help-Viewer magenta on anything active, black
+ * text. Select it with `bar.theme = "cde"`; layer your own tweaks via
+ * `$XDG_CONFIG_HOME/wafflebar/theme.css`. Styles every class the renderer emits — see
+ * docs/STYLING.md for the inventory.
+ *
+ * THE GRAMMAR (shared with themes/workbench.css; keep the two in step):
+ *   · flat faces — no gradients, no shadows, no translucency, no animation
+ *   · border-radius: 0 everywhere
+ *   · every control is a 2px hard bevel: light top+left, dark bottom+right; pressed INVERTS it
+ *   · content sits in inset wells (the bevel reversed)
+ *   · separators are chisels: one dark line, one light line
+ *   · focus is a 1px dotted rectangle inside the bevel, never a coloured glow
+ *
+ * PALETTE                       WHY
+ *   face        #aeb2c3         bar surface, module faces (the CDE default blue-grey)
+ *   face-light  #d3d6e0         bevel highlight (top/left)
+ *   face-dark   #6c7080         bevel shadow (bottom/right)
+ *   face-hover  #bcc0cf         the only hover affordance — one step, no fade
+ *   well        #9296a8         inset recesses (clock, title, gauges)
+ *   text        #000000         all label text
+ *   text-inv    #ffffff         text on the accent band
+ *   accent      #a83e7a         Help-Viewer magenta: active tag, focused task, title bands
+ *   dim         #7a7e8c         empty tags, secondary text
+ *   warn        #c07a1e  alert #a5202a  ok #4a7a4a   bucket BANDS (urgent tag, tray attention)
+ *   warn-text   #7a4a10  alert-text #8a1a22  ok-text #1f5c33   bucket LABEL text: the bright
+ *                                 hues wash out on the #9296a8 well, so labels take darker tones
+ *
+ * Adwaita reasserts background-image / box-shadow / transition / min-height per widget STATE, so
+ * every state selector below repeats the reset. Deleting those "redundant" lines brings the round
+ * corners and fades back. */
+
+/* ---------------------------------------------------------------- host ---- */
+
+window#wafflebar {
+    background-color: #aeb2c3;
+    color: #000000;
+    /* Tengoku's design grid is 1024/12: it is only crisp at 12/24/36px (assets/fonts/README.md).
+     * It carries no icon glyphs, hence the fallbacks. Install it with scripts/install-fonts.sh. */
+    font-family: "Tengoku", "Hurmit Nerd Font Mono", monospace;
+    font-size: 12px;
+    font-weight: normal;
+}
+
+#grid {
+    /* The visible bar surface is this container, NOT window#wafflebar (docs/STYLING.md). The whole
+     * bar is one raised gadget, the way the CDE front panel is. */
+    margin: 0;
+    padding: 0 2px;
+    background-color: #aeb2c3;
+    color: #000000;
+    border-style: solid;
+    border-width: 2px;
+    border-top-color: #d3d6e0;
+    border-left-color: #d3d6e0;
+    border-right-color: #6c7080;
+    border-bottom-color: #6c7080;
+    border-radius: 0;
+}
+
+.module {
+    padding: 0 2px;
+}
+
+/* Generic clickable wrapper on every Button: the raised gadget. */
+.wb-button,
+button {
+    border-radius: 0;
+    border-style: solid;
+    border-width: 2px;
+    border-top-color: #d3d6e0;
+    border-left-color: #d3d6e0;
+    border-right-color: #6c7080;
+    border-bottom-color: #6c7080;
+    background-color: #aeb2c3;
+    background-image: none;
+    box-shadow: none;
+    text-shadow: none;
+    transition: none;
+    color: #000000;
+    padding: 0 4px;
+    min-height: 0;
+    min-width: 0;
+    outline: none;
+}
+.wb-button:hover,
+button:hover {
+    background-color: #bcc0cf;
+    background-image: none;
+    box-shadow: none;
+    transition: none;
+}
+/* Pressed inverts the bevel — the gadget goes in. */
+.wb-button:active,
+.wb-button:checked,
+button:active,
+button:checked {
+    border-top-color: #6c7080;
+    border-left-color: #6c7080;
+    border-right-color: #d3d6e0;
+    border-bottom-color: #d3d6e0;
+    background-color: #9296a8;
+    background-image: none;
+    box-shadow: none;
+    transition: none;
+}
+/* Motif focus: a dotted rectangle inside the bevel. Not a ring, not a glow. */
+.wb-button:focus,
+button:focus,
+.wb-button:focus-visible,
+button:focus-visible {
+    outline-style: dotted;
+    outline-width: 1px;
+    outline-color: #000000;
+    outline-offset: -4px;
+    box-shadow: none;
+}
+.wb-button:disabled,
+button:disabled {
+    color: #7a7e8c;
+    background-color: #aeb2c3;
+    background-image: none;
+}
+
+.dim-label {
+    color: #7a7e8c;
+}
+
+.placeholder {
+    color: #7a7e8c;
+    font-style: italic;
+}
+
+/* ------------------------------------------------------------- modules ---- */
+
+/* clock: an inset well, the way a Motif gauge reads. */
+.clock {
+    background-color: #9296a8;
+    color: #000000;
+    border-style: solid;
+    border-width: 2px;
+    border-top-color: #6c7080;
+    border-left-color: #6c7080;
+    border-right-color: #d3d6e0;
+    border-bottom-color: #d3d6e0;
+    border-radius: 0;
+    padding: 0 6px;
+}
+
+/* tags: the front-panel workspace switcher — equal raised boxes, active one pressed in. */
+.tags {
+    padding: 0 2px;
+}
+.tag {
+    padding: 0 6px;
+    min-width: 14px;
+    color: #7a7e8c; /* empty */
+    background-color: #aeb2c3;
+    border-style: solid;
+    border-width: 2px;
+    border-top-color: #d3d6e0;
+    border-left-color: #d3d6e0;
+    border-right-color: #6c7080;
+    border-bottom-color: #6c7080;
+    border-radius: 0;
+}
+.tag.occupied {
+    color: #000000;
+}
+.tag.active {
+    /* pressed in + the Help-Viewer magenta band */
+    color: #ffffff;
+    background-color: #a83e7a;
+    border-top-color: #6c7080;
+    border-left-color: #6c7080;
+    border-right-color: #d3d6e0;
+    border-bottom-color: #d3d6e0;
+}
+.tag.urgent {
+    color: #ffffff;
+    background-color: #a5202a;
+}
+
+/* window: the focused title, in a well spanning the centre group. */
+.window {
+    background-color: #9296a8;
+    color: #000000;
+    border-style: solid;
+    border-width: 2px;
+    border-top-color: #6c7080;
+    border-left-color: #6c7080;
+    border-right-color: #d3d6e0;
+    border-bottom-color: #d3d6e0;
+    border-radius: 0;
+    padding: 0 6px;
+}
+
+/* layout: the dwl layout symbol — a small raised gadget, like a Motif indicator box. */
+.layout {
+    background-color: #aeb2c3;
+    color: #000000;
+    border-style: solid;
+    border-width: 2px;
+    border-top-color: #d3d6e0;
+    border-left-color: #d3d6e0;
+    border-right-color: #6c7080;
+    border-bottom-color: #6c7080;
+    border-radius: 0;
+    padding: 0 4px;
+}
+
+/* feedblocks: the someblocks right strip (NATEWM_MODE channel 2); one well per block. */
+.feedblocks {
+    padding: 0 2px;
+}
+.feedblock {
+    background-color: #9296a8;
+    color: #000000;
+    border-style: solid;
+    border-width: 2px;
+    border-top-color: #6c7080;
+    border-left-color: #6c7080;
+    border-right-color: #d3d6e0;
+    border-bottom-color: #d3d6e0;
+    border-radius: 0;
+    padding: 0 5px;
+    margin: 0 1px;
+}
+
+/* tasklist: raised button per window; focused is pressed in, minimised goes dim. */
+.tasklist {
+    padding: 0 2px;
+}
+.task {
+    padding: 0 6px;
+    color: #000000;
+    background-color: #aeb2c3;
+    border-style: solid;
+    border-width: 2px;
+    border-top-color: #d3d6e0;
+    border-left-color: #d3d6e0;
+    border-right-color: #6c7080;
+    border-bottom-color: #6c7080;
+    border-radius: 0;
+}
+.task:hover {
+    background-color: #bcc0cf;
+}
+.task.focused {
+    color: #ffffff;
+    background-color: #a83e7a;
+    border-top-color: #6c7080;
+    border-left-color: #6c7080;
+    border-right-color: #d3d6e0;
+    border-bottom-color: #d3d6e0;
+}
+.task.minimized {
+    color: #7a7e8c;
+}
+.task-icon {
+    margin-right: 4px;
+}
+.task-label {
+    color: inherit;
+}
+
+/* launcher: gadget boxes + the shared right-click menu. */
+.launcher {
+    padding: 0 2px;
+}
+.wb-launcher-button {
+    padding: 0 4px;
+    border-radius: 0;
+}
+.wb-launcher-icon {
+    margin: 0 1px;
+}
+.wb-launcher-label {
+    color: #000000;
+}
+/* Menus are flat Motif panels: a hard 1px black edge over the face, no radius, no shadow. */
+.wb-menu {
+    background-color: #aeb2c3;
+    color: #000000;
+    border: 1px solid #6c7080;
+    border-radius: 0;
+    padding: 2px;
+}
+.wb-menu-item {
+    padding: 2px 10px;
+    color: #000000;
+    border-radius: 0;
+}
+.wb-menu-item:hover {
+    background-color: #a83e7a;
+    color: #ffffff;
+}
+
+/* statustray: SNI icons on a 16px grid, each in its own gadget. */
+.statustray {
+    padding: 0 2px;
+}
+.tray-item {
+    padding: 0 2px;
+    border-radius: 0;
+}
+.tray-icon {
+    margin: 0 1px;
+}
+.tray-item.needs-attention {
+    background-color: #a5202a;
+}
+
+/* cpu / memory / network / volume / bluetooth: inset gauges. The load buckets colour the TEXT —
+ * Motif never animated a background. */
+.cpu,
+.memory,
+.network,
+.volume,
+.bluetooth {
+    background-color: #9296a8;
+    color: #000000;
+    border-style: solid;
+    border-width: 2px;
+    border-top-color: #6c7080;
+    border-left-color: #6c7080;
+    border-right-color: #d3d6e0;
+    border-bottom-color: #d3d6e0;
+    border-radius: 0;
+    padding: 0 5px;
+}
+.cpu-icon,
+.mem-icon,
+.net-icon,
+.vol-icon,
+.bt-icon {
+    color: #000000; /* recolours the bundled symbolic SVGs */
+}
+.cpu-label,
+.mem-label,
+.net-label,
+.vol-label {
+    color: #000000;
+}
+.cpu.low .cpu-label,
+.memory.low .mem-label {
+    color: #1f5c33;
+}
+.cpu.high .cpu-label,
+.memory.high .mem-label {
+    color: #7a4a10;
+}
+.cpu.critical .cpu-label,
+.memory.critical .mem-label {
+    color: #8a1a22;
+    font-weight: bold;
+}
+.memory.swapping .mem-icon {
+    color: #7a4a10;
+}
+.volume.muted .vol-icon,
+.volume.muted .vol-label {
+    color: #7a7e8c;
+}
+
+/* bluetooth click-out menu + the volume mixer popover: flat Motif panels. */
+.bt-menu,
+.volume-mixer {
+    background-color: #aeb2c3;
+    color: #000000;
+    border: 1px solid #6c7080;
+    border-radius: 0;
+    padding: 4px;
+    min-width: 200px;
+}
+.bt-menu-power {
+    font-weight: bold;
+}
+.bt-menu-item {
+    padding: 2px 6px;
+    border-radius: 0;
+}
+.bt-menu-item:hover {
+    background-color: #a83e7a;
+    color: #ffffff;
+}
+
+/* show-desktop: one toggle gadget; .active is pressed in. */
+.wb-showdesktop {
+    padding: 0 4px;
+    border-radius: 0;
+    color: #000000;
+}
+.wb-showdesktop.active {
+    color: #ffffff;
+    background-color: #a83e7a;
+    border-top-color: #6c7080;
+    border-left-color: #6c7080;
+    border-right-color: #d3d6e0;
+    border-bottom-color: #d3d6e0;
+}
+
+/* applications menu: bar gadget + the two-pane popover as a Motif panel. */
+.appmenu {
+    padding: 0 4px;
+    color: #000000;
+}
+.appmenu-popover {
+    background-color: #aeb2c3;
+    color: #000000;
+    border: 2px solid #6c7080;
+    border-radius: 0;
+    padding: 2px;
+}
+.appmenu-popover row {
+    border-radius: 0;
+    padding: 1px 4px;
+}
+.appmenu-popover row:selected {
+    background-color: #a83e7a;
+    color: #ffffff;
+}
+.appmenu-popover entry {
+    margin-bottom: 4px;
+    border-radius: 0;
+    background-color: #9296a8;
+    color: #000000;
+    border-style: solid;
+    border-width: 2px;
+    border-top-color: #6c7080;
+    border-left-color: #6c7080;
+    border-right-color: #d3d6e0;
+    border-bottom-color: #d3d6e0;
+    box-shadow: none;
+    background-image: none;
+}
+
+/* ------------------------------------------------------- control centre ---- */
+
+.controlcenter {
+    color: #000000;
+}
+popover.controlcenter > contents,
+.controlcenter {
+    background-color: #aeb2c3;
+    color: #000000;
+    border-radius: 0;
+}
+popover.controlcenter > contents {
+    border: 2px solid #6c7080;
+    padding: 4px;
+    box-shadow: none;
+}
+/* Header reads as a CDE window title band. */
+.cc-header {
+    background-color: #a83e7a;
+    color: #ffffff;
+    padding: 2px 4px;
+}
+.cc-time {
+    font-size: 24px; /* on the 12px grid */
+    font-weight: bold;
+    color: #ffffff;
+}
+.cc-date {
+    color: #ffffff;
+}
+.cc-battery,
+.cc-stat {
+    background-color: #9296a8;
+    color: #000000;
+    border-style: solid;
+    border-width: 2px;
+    border-top-color: #6c7080;
+    border-left-color: #6c7080;
+    border-right-color: #d3d6e0;
+    border-bottom-color: #d3d6e0;
+    border-radius: 0;
+    padding: 0 4px;
+}
+.cc-stats {
+    color: #000000;
+}
+/* Sliders: an inset trough, a raised SQUARE handle — no round grips anywhere. */
+.cc-slider-icon {
+    color: #000000;
+}
+.cc-value {
+    color: #000000;
+    min-width: 42px;
+}
+.cc-slider scale trough {
+    background-color: #9296a8;
+    background-image: none;
+    border-style: solid;
+    border-width: 2px;
+    border-top-color: #6c7080;
+    border-left-color: #6c7080;
+    border-right-color: #d3d6e0;
+    border-bottom-color: #d3d6e0;
+    border-radius: 0;
+    min-height: 8px;
+    box-shadow: none;
+}
+.cc-slider scale highlight {
+    background-color: #a83e7a;
+    background-image: none;
+    border-radius: 0;
+    box-shadow: none;
+}
+.cc-slider scale slider {
+    background-color: #aeb2c3;
+    background-image: none;
+    border-style: solid;
+    border-width: 2px;
+    border-top-color: #d3d6e0;
+    border-left-color: #d3d6e0;
+    border-right-color: #6c7080;
+    border-bottom-color: #6c7080;
+    border-radius: 0;
+    min-width: 10px;
+    min-height: 16px;
+    margin: -6px;
+    box-shadow: none;
+}
+/* Cards + their expandable detail: raised gadgets, pressed when open. */
+.cc-pill,
+.cc-detail-item,
+.cc-action {
+    background-color: #aeb2c3;
+    color: #000000;
+    border-style: solid;
+    border-width: 2px;
+    border-top-color: #d3d6e0;
+    border-left-color: #d3d6e0;
+    border-right-color: #6c7080;
+    border-bottom-color: #6c7080;
+    border-radius: 0;
+    padding: 4px 6px;
+    box-shadow: none;
+    background-image: none;
+}
+.cc-pill:hover,
+.cc-detail-item:hover,
+.cc-action:hover {
+    background-color: #bcc0cf;
+}
+.cc-pill:checked,
+.cc-pill:active,
+.cc-action:active {
+    border-top-color: #6c7080;
+    border-left-color: #6c7080;
+    border-right-color: #d3d6e0;
+    border-bottom-color: #d3d6e0;
+    background-color: #9296a8;
+}
+.cc-pill-icon {
+    color: #000000;
+}
+.cc-pill-label {
+    color: #000000;
+}
+.cc-pill-row {
+    padding: 1px 0;
+}
+.cc-chevron {
+    color: #6c7080;
+}
+.cc-detail {
+    padding: 2px 4px;
+}
+.cc-actions {
+    padding: 2px 0;
+}
+
+/* ---------------------------------------------------------- settings ------ */
+
+.settings {
+    background-color: #aeb2c3;
+    color: #000000;
+}
+.settings row {
+    border-radius: 0;
+}
+.settings row:selected {
+    background-color: #a83e7a;
+    color: #ffffff;
+}
+.settings entry,
+.settings spinbutton {
+    background-color: #9296a8;
+    background-image: none;
+    color: #000000;
+    border-style: solid;
+    border-width: 2px;
+    border-top-color: #6c7080;
+    border-left-color: #6c7080;
+    border-right-color: #d3d6e0;
+    border-bottom-color: #d3d6e0;
+    border-radius: 0;
+    box-shadow: none;
+}
+.settings button {
+    background-color: #aeb2c3;
+    color: #000000;
+    border-radius: 0;
+}
+.settings button:hover {
+    background-color: #bcc0cf;
+}
+.settings button.destructive-action {
+    background-color: #a5202a;
+    color: #ffffff;
+}
+
+/* ------------------------------------------------------- notifications ---- */
+
+/* Each popup is a Motif dialog box: raised body, title band, square close gadget.
+ * The left-edge urgency accent is the cross-theme convention (docs/STYLING.md) — kept, widened
+ * to 4px so it survives the 2px bevel. */
+.notifications {
+    padding: 4px;
+}
+.notification {
+    background-color: #aeb2c3;
+    color: #000000;
+    border-style: solid;
+    border-width: 2px;
+    border-top-color: #d3d6e0;
+    border-left-color: #d3d6e0;
+    border-right-color: #6c7080;
+    border-bottom-color: #6c7080;
+    border-radius: 0;
+    padding: 4px 6px;
+    box-shadow: none;
+    border-left: 4px solid #a83e7a; /* normal */
+}
+.notification.notification-low {
+    border-left-color: #7a7e8c;
+}
+.notification.notification-critical {
+    border-left-color: #a5202a;
+}
+.notification-summary {
+    font-weight: bold;
+    color: #000000;
+}
+.notification-body {
+    color: #000000;
+}
+.notification-close {
+    padding: 0 4px;
+    min-height: 0;
+    min-width: 0;
+    border-radius: 0;
+}
+
+/* --------------------------------------------------------- separators ----- */
+
+/* The chisel: one dark line, one light line, hard-stopped. gtk::Separator also draws its own line
+ * from `color`, so that is set to the shadow and the highlight comes from the background image. */
+.wb-separator {
+    margin: 2px 2px;
+    color: #6c7080;
+}
+.wb-separator.transparent {
+    background-image: none;
+}
+.wb-separator.line {
+    min-width: 2px;
+    background-image: linear-gradient(
+        to right,
+        #6c7080 0px,
+        #6c7080 1px,
+        #d3d6e0 1px,
+        #d3d6e0 2px
+    );
+    background-repeat: no-repeat;
+    background-size: 2px 100%;
+    background-position: center;
+}
+.wb-separator.handle {
+    /* the Motif sash: a short raised nub */
+    min-width: 6px;
+    background-color: #aeb2c3;
+    background-image: linear-gradient(
+        to right,
+        #d3d6e0 0px,
+        #d3d6e0 2px,
+        #aeb2c3 2px,
+        #aeb2c3 4px,
+        #6c7080 4px,
+        #6c7080 6px
+    );
+    background-repeat: no-repeat;
+    background-size: 6px 60%;
+    background-position: center;
+}
+.wb-separator.dots {
+    min-width: 4px;
+    background-image: linear-gradient(
+        to bottom,
+        #6c7080 0px,
+        #6c7080 2px,
+        transparent 2px,
+        transparent 4px
+    );
+    background-repeat: repeat-y;
+    background-size: 2px 4px;
+    background-position: center;
+}

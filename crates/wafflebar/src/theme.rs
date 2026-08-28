@@ -20,12 +20,16 @@ use wafflebar_core::Config;
 
 const NORD_CSS: &str = include_str!("../../../themes/nord.css");
 const DAWN_CSS: &str = include_str!("../../../themes/dawn.css");
+const WORKBENCH_CSS: &str = include_str!("../../../themes/workbench.css");
+const CDE_CSS: &str = include_str!("../../../themes/cde.css");
 
 /// A built-in theme by name, or `None` for an unknown name.
 fn builtin(name: &str) -> Option<&'static str> {
     match name {
         "nord" => Some(NORD_CSS),
         "dawn" => Some(DAWN_CSS),
+        "workbench" => Some(WORKBENCH_CSS),
+        "cde" => Some(CDE_CSS),
         _ => None,
     }
 }
@@ -179,7 +183,7 @@ fn resolve(bar_theme: Option<&str>, config_dir: Option<&Path>) -> ThemeSource {
     match builtin(theme) {
         Some(css) => ThemeSource::Builtin(css),
         None => {
-            warn!(theme, "unknown theme (built-ins: nord, dawn); using nord");
+            warn!(theme, "unknown theme (built-ins: nord, dawn, workbench, cde); using nord");
             ThemeSource::Builtin(NORD_CSS)
         }
     }
@@ -212,6 +216,8 @@ mod tests {
         assert!(matches!(resolve(Some("  "), None), ThemeSource::Builtin(_)));
         // Known built-in name → builtin; unknown → nord fallback.
         assert!(matches!(resolve(Some("dawn"), None), ThemeSource::Builtin(_)));
+        assert!(matches!(resolve(Some("workbench"), None), ThemeSource::Builtin(_)));
+        assert!(matches!(resolve(Some("cde"), None), ThemeSource::Builtin(_)));
         assert!(matches!(resolve(Some("noord"), None), ThemeSource::Builtin(_)));
         // A path-looking value that doesn't exist → nord fallback (not Path).
         assert!(matches!(resolve(Some("/nope/x.css"), None), ThemeSource::Builtin(_)));

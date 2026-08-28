@@ -6,11 +6,13 @@ use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 use gtk4::gdk;
+use gtk4::gio;
 use gtk4::glib;
 use gtk4::prelude::*;
 use gtk4::{Application, ApplicationWindow, CenterBox, Grid, Orientation};
 use gtk4_layer_shell::{Edge, Layer, LayerShell};
 use tracing::{debug, info, warn};
+use wafflebar_core::outputs::{select_outputs, OutputGeom};
 use wafflebar_core::{
     Align, BluetoothCommand, Config, Event, GridEngine, Launch, Layout, Position, Topic,
     TrayCommand, VolumeCommand, WmCommand,
@@ -70,7 +72,7 @@ pub fn build_bars(
     // mutably borrow it.
     //
     // **Two clocks (NATEWM_MODE flag 6, by construction).** The WM fd and the feed listener fd
-    // each get their *own* `event_loop::add_fd_watch_local` source below in `present_bar`. Both
+    // each get their *own* `event_loop::add_fd_watch_local` source in `wire_shared_watches`. Both
     // are GLib `g_unix_fd_add_full` sources at `G_PRIORITY_DEFAULT`; neither is tied to the
     // GTK render tick. Read-side back-pressure on the renderer cannot back-pressure either
     // producer — the reducer's coalesce-latest means the renderer reads the *current* snapshot
@@ -84,57 +86,367 @@ pub fn build_bars(
         }
     };
 
-    let monitors = display.monitors();
-    let mut mons: Vec<gdk::Monitor> = Vec::new();
-    for i in 0..monitors.n_items() {
-        if let Some(m) = monitors
-            .item(i)
-            .and_then(|o| o.downcast::<gdk::Monitor>().ok())
-        {
-            mons.push(m);
-        }
+    // The live bar set. One entry per output currently carrying a bar; the registry is what makes
+    // hotplug reconcilable (add the new output's bar, drop the departed one's) rather than a
+    // restart-only affair.
+    let bars: Rc<RefCell<Vec<Bar>>> = Rc::new(RefCell::new(Vec::new()));
+
+    // One WM watch, one feed watch, one shutdown observer — for the PROCESS, not per bar. These
+    // used to be created inside `present_bar`, i.e. once per monitor: two bars meant two watches on
+    // the *same* fd, and whichever callback ran first drained `dispatch()` while the other bar saw
+    // an empty batch and never re-rendered. One watch fanning out to every live host also lets a
+    // bar created later (hotplug) receive events at all.
+    wire_shared_watches(app, &backend, &feed, &bars);
+
+    // The reconcile context: everything a re-evaluation needs, in one Rc so both the hotplug and
+    // the geometry signals can hold it.
+    let ctx = Rc::new(BarCtx {
+        app: app.clone(),
+        config: config.clone(),
+        engine: engine.clone(),
+        config_path: config_path.map(std::path::Path::to_path_buf),
+        backend: backend.clone(),
+        monitors: display.monitors(),
+        bars: bars.clone(),
+        hooked: RefCell::new(Vec::new()),
+        pending: std::cell::Cell::new(false),
+    });
+    ctx.reconcile();
+
+    // Hotplug: GDK's monitor list is a ListModel, so a display appearing, disappearing, or being
+    // re-laid-out arrives as items-changed. Re-running the whole selection (rather than appending)
+    // is what keeps a *positional* config right afterwards: when a new display becomes the
+    // left-most one, `monitor = "left"` has to move to it.
+    {
+        let monitors = ctx.monitors.clone();
+        let ctx = ctx.clone();
+        monitors.connect_items_changed(move |_, position, removed, added| {
+            info!(position, removed, added, "monitor list changed; reconciling bars");
+            ctx.schedule();
+        });
     }
-    if mons.is_empty() {
-        warn!("no monitors reported; creating a single unanchored bar");
-        present_bar(app, None, config, engine, &backend, &feed, config_path);
-        return;
+    std::mem::forget(ctx); // lives for the process, like the bar and the fd watches
+}
+
+/// Everything a bar reconcile needs, shared by the hotplug and geometry signals.
+struct BarCtx {
+    app: Application,
+    config: Config,
+    engine: GridEngine,
+    config_path: Option<std::path::PathBuf>,
+    backend: Option<Rc<RefCell<dyn WmConnection>>>,
+    monitors: gio::ListModel,
+    bars: Rc<RefCell<Vec<Bar>>>,
+    /// Monitors whose geometry we already watch; pruned as outputs go away so a departed
+    /// `gdk::Monitor` is not kept alive by this list.
+    hooked: RefCell<Vec<gdk::Monitor>>,
+    pending: std::cell::Cell<bool>,
+}
+
+impl BarCtx {
+    /// Reconcile on the next idle, coalescing a burst into one pass.
+    ///
+    /// Never reconcile straight out of a signal: a geometry notify can fire *during* a reconcile
+    /// (creating a bar moves a surface), and re-entering would hit the `bars` RefCell mid-borrow.
+    fn schedule(self: &Rc<Self>) {
+        if self.pending.replace(true) {
+            return;
+        }
+        let this = self.clone();
+        glib::idle_add_local_once(move || {
+            this.pending.set(false);
+            this.reconcile();
+        });
     }
 
-    let targets = select_monitors(&mons, &config.bar.monitor);
-    info!(want = config.bar.monitor, selected = targets.len(), total = mons.len(), "monitor selection");
-    for mon in targets {
-        present_bar(app, Some(&mon), config, engine, &backend, &feed, config_path);
+    fn reconcile(self: &Rc<Self>) {
+        reconcile_bars(
+            &self.app,
+            &self.config,
+            &self.engine,
+            self.config_path.as_deref(),
+            &self.backend,
+            &self.monitors,
+            &self.bars,
+        );
+        self.watch_geometry();
+    }
+
+    /// Watch each output's geometry.
+    ///
+    /// A freshly hotplugged output is announced *before* the compositor has laid it out: at
+    /// items-changed time it reports `0x0+0+0`, so any position-based decision taken then is taken
+    /// on placeholder data ("the new display is left-most" — it is at x=0 because nothing has
+    /// placed it yet). The geometry notify is when the truth arrives, so selection re-runs there.
+    fn watch_geometry(self: &Rc<Self>) {
+        let live: Vec<gdk::Monitor> =
+            monitor_geoms(&self.monitors).into_iter().map(|(m, _)| m).collect();
+        self.hooked.borrow_mut().retain(|h| live.iter().any(|m| m == h));
+        for m in live {
+            if self.hooked.borrow().iter().any(|h| h == &m) {
+                continue;
+            }
+            self.hooked.borrow_mut().push(m.clone());
+            let this = self.clone();
+            m.connect_geometry_notify(move |_| this.schedule());
+        }
     }
 }
 
-/// Resolve `bar.monitor` to the monitor(s) to use (by layout position — robust to NVIDIA
-/// connector renaming — or by exact connector/model; unknown falls back to primary/center).
-fn select_monitors(mons: &[gdk::Monitor], want: &str) -> Vec<gdk::Monitor> {
-    let want = want.trim();
-    if want.eq_ignore_ascii_case("all") {
-        return mons.to_vec();
+/// A bar and the output it sits on.
+///
+/// Identity is the `gdk::Monitor` object, not its connector name: GDK does not always have a
+/// connector for an output at the moment it announces it (a display hotplugged into a nested
+/// wlroots session comes through with `connector() == None`), and two such outputs would collide
+/// on the empty string — the second would never get a bar, and the first would be mistaken for the
+/// unanchored bar and destroyed on the next reconcile. The name is kept for logs only. `monitor`
+/// is `None` only for the unanchored fallback bar, used while no outputs are reported at all.
+struct Bar {
+    monitor: Option<gdk::Monitor>,
+    name: String,
+    window: ApplicationWindow,
+    host: Rc<Host>,
+}
+
+/// Snapshot the display's monitors as GTK-free geometry, keeping each `gdk::Monitor` alongside.
+///
+/// Outputs that have no size yet are skipped. GDK announces a hotplugged display before the
+/// compositor has laid it out, and in that window it reports `0x0+0+0` — placing a bar on that
+/// reading means picking "the left-most display" from a placeholder origin, then moving the bar
+/// again a frame later when the real geometry lands. Waiting for a size costs nothing (the
+/// geometry notify re-runs the reconcile) and turns two visible transitions into one.
+fn monitor_geoms(model: &gio::ListModel) -> Vec<(gdk::Monitor, OutputGeom)> {
+    let mut out = Vec::new();
+    for i in 0..model.n_items() {
+        let Some(m) = model.item(i).and_then(|o| o.downcast::<gdk::Monitor>().ok()) else {
+            continue;
+        };
+        let g = m.geometry();
+        if g.width() <= 0 || g.height() <= 0 {
+            debug!(connector = ?m.connector(), "output has no geometry yet; skipping this pass");
+            continue;
+        }
+        out.push((
+            m.clone(),
+            OutputGeom {
+                connector: m.connector().map(|c| c.to_string()).unwrap_or_default(),
+                model: m.model().map(|c| c.to_string()),
+                x: g.x(),
+                y: g.y(),
+                width: g.width(),
+                height: g.height(),
+            },
+        ));
     }
-    let mut by_x: Vec<gdk::Monitor> = mons.to_vec();
-    by_x.sort_by_key(|m| m.geometry().x());
-    let center = by_x.get(by_x.len() / 2).cloned();
-    match want.to_ascii_lowercase().as_str() {
-        "left" => by_x.first().cloned().into_iter().collect(),
-        "right" => by_x.last().cloned().into_iter().collect(),
-        "primary" | "center" => center.into_iter().collect(),
-        _ => {
-            let exact = mons.iter().find(|m| {
-                m.connector().map(|c| c == want).unwrap_or(false)
-                    || m.model().map(|c| c == want).unwrap_or(false)
-            });
-            match exact {
-                Some(m) => vec![m.clone()],
-                None => {
-                    warn!(want, "no monitor matched; using primary (center)");
-                    center.into_iter().collect()
+    out
+}
+
+/// A human-readable name for logs: the connector when GDK has one, else the model, else the
+/// geometry. Never used for identity — see [`Bar`].
+fn label_for(o: &OutputGeom) -> String {
+    if !o.connector.is_empty() {
+        return o.connector.clone();
+    }
+    o.model.clone().unwrap_or_else(|| format!("{}x{}+{}+{}", o.width, o.height, o.x, o.y))
+}
+
+fn label_for_monitor(m: &gdk::Monitor) -> String {
+    let g = m.geometry();
+    label_for(&OutputGeom {
+        connector: m.connector().map(|c| c.to_string()).unwrap_or_default(),
+        model: m.model().map(|c| c.to_string()),
+        x: g.x(),
+        y: g.y(),
+        width: g.width(),
+        height: g.height(),
+    })
+}
+
+/// Bring the live bar set in line with the current outputs and `bar.monitor`
+/// (`wafflebar_core::outputs` owns the ordering/selection rules and their tests).
+///
+/// Idempotent: a reconcile that resolves to the same outputs creates and destroys nothing, so a
+/// repeated or spurious items-changed (a mode change, a compositor re-announcing the same layout)
+/// does not flicker the bars.
+fn reconcile_bars(
+    app: &Application,
+    config: &Config,
+    engine: &GridEngine,
+    config_path: Option<&std::path::Path>,
+    backend: &Option<Rc<RefCell<dyn WmConnection>>>,
+    model: &gio::ListModel,
+    bars: &Rc<RefCell<Vec<Bar>>>,
+) {
+    let geoms = monitor_geoms(model);
+
+    // No outputs at all (headless, or every display asleep): one unanchored bar — but never zero
+    // bars, and never a second unanchored one on re-entry.
+    if geoms.is_empty() {
+        if bars.borrow().is_empty() {
+            warn!("no monitors reported; creating a single unanchored bar");
+            if let Some(bar) = present_bar(app, None, config, engine, backend, config_path) {
+                bars.borrow_mut().push(bar);
+            }
+        }
+        return;
+    }
+
+    let outputs: Vec<OutputGeom> = geoms.iter().map(|(_, g)| g.clone()).collect();
+    let selection = select_outputs(&outputs, &config.bar.monitor);
+    if selection.fell_back {
+        warn!(want = config.bar.monitor, "no monitor matched; using primary (center)");
+    }
+    let wanted: Vec<(gdk::Monitor, String)> = selection
+        .indices
+        .iter()
+        .map(|&i| (geoms[i].0.clone(), label_for(&outputs[i])))
+        .collect();
+    info!(
+        want = config.bar.monitor,
+        selected = wanted.len(),
+        total = outputs.len(),
+        "monitor selection"
+    );
+
+    // GDK often has no connector name yet at the moment it announces an output (the wl_output
+    // name and geometry arrive in later events), so a bar created on hotplug starts with a
+    // placeholder label. Refresh it once the real name exists, or every later log line about this
+    // bar is unreadable.
+    {
+        let mut live = bars.borrow_mut();
+        for bar in live.iter_mut() {
+            if let Some(m) = &bar.monitor {
+                let name = label_for_monitor(m);
+                if name != bar.name {
+                    debug!(was = bar.name, now = name, "monitor name resolved");
+                    bar.name = name;
                 }
             }
         }
     }
+
+    // Drop bars whose output is gone or no longer selected. Tearing the plugins down first
+    // (`replace_slots(vec![])`) runs each plugin's teardown hook, so nothing keeps ticking against
+    // a destroyed window.
+    {
+        let mut live = bars.borrow_mut();
+        live.retain(|bar| {
+            let keep = match &bar.monitor {
+                Some(m) => wanted.iter().any(|(want_m, _)| want_m == m),
+                None => false, // an unanchored bar is only correct while there are no outputs
+            };
+            if !keep {
+                info!(monitor = bar.name, "bar removed");
+                bar.host.replace_slots(Vec::new());
+                bar.window.destroy();
+            }
+            keep
+        });
+    }
+
+    // Add bars for newly selected outputs.
+    for (mon, name) in wanted {
+        if bars.borrow().iter().any(|b| b.monitor.as_ref() == Some(&mon)) {
+            continue;
+        }
+        if let Some(bar) = present_bar(app, Some(&mon), config, engine, backend, config_path) {
+            info!(monitor = name, "bar added");
+            bars.borrow_mut().push(bar);
+        }
+    }
+
+    // A bar created now (startup or hotplug) has missed every event so far: seed it from the
+    // backend's current snapshot, or it stays blank until the WM next says something.
+    if let Some(b) = backend {
+        let snapshot = b.borrow().snapshot();
+        for bar in bars.borrow().iter() {
+            for ev in &snapshot {
+                bar.host.deliver_event(&Event::Wm(ev.clone()));
+            }
+        }
+    }
+}
+
+/// The process-wide watches: the WM fd, the feed fd, and the shutdown observer. Each fans its
+/// events out to every live bar, so creating or destroying a bar never touches fd wiring.
+fn wire_shared_watches(
+    app: &Application,
+    backend: &Option<Rc<RefCell<dyn WmConnection>>>,
+    feed: &Option<Rc<RefCell<SomeblocksIntake>>>,
+    bars: &Rc<RefCell<Vec<Bar>>>,
+) {
+    // === Clock 1: WM fd. ===
+    // Wake on the WM backend's readable fd, drain its dispatch(), deliver WmEvents to the host.
+    // After every dispatch, check `closed()` — when dwl exits, the stdin backend flips this and
+    // we route through the same shutdown path as SIGTERM/SIGINT (NATEWM_MODE flag 5).
+    // NOT tied to the GTK render tick.
+    if let Some(b) = backend {
+        let fd = b.borrow().fd();
+        let b_p = b.clone();
+        let bars_p = bars.clone();
+        let _fd_source = event_loop::add_fd_watch_local(fd, move || {
+            for ev in b_p.borrow_mut().dispatch() {
+                for bar in bars_p.borrow().iter() {
+                    bar.host.deliver_event(&Event::Wm(ev.clone()));
+                }
+            }
+            if b_p.borrow().closed() {
+                tracing::info!(
+                    "WM backend reported closed (compositor exited); requesting graceful shutdown"
+                );
+                crate::request_shutdown();
+                return glib::ControlFlow::Break;
+            }
+            glib::ControlFlow::Continue
+        });
+    }
+
+    // === Clock 2: someblocks feed fd. ===
+    // Independent of the WM watch and the GTK render tick. The listener fd becomes readable when
+    // a producer connects OR an already-connected producer writes; dispatch() handles both, and
+    // the reducer's coalesce-latest guarantees ≤1 FeedEvent::Frame per wake. If the renderer is
+    // slow, the producer is *not* back-pressured — the reducer overwrites in place. "Never
+    // blocks dwl"-style guarantee, by construction.
+    if let Some(f) = feed {
+        let fd = f.borrow().fd();
+        let f_p = f.clone();
+        let bars_p = bars.clone();
+        let _fd_source = event_loop::add_fd_watch_local(fd, move || {
+            for ev in f_p.borrow_mut().dispatch() {
+                for bar in bars_p.borrow().iter() {
+                    bar.host.deliver_event(&Event::Feed(ev.clone()));
+                }
+            }
+            if crate::shutdown_requested() {
+                return glib::ControlFlow::Break;
+            }
+            glib::ControlFlow::Continue
+        });
+    }
+
+    // === Shutdown observer. ===
+    // Polls the static SHUTDOWN_REQUESTED flag (set by signal handlers or the WM EOF observer
+    // in the Clock-1 callback above). When the flag flips, we run the *one* idempotent
+    // `SomeblocksIntake::cleanup()` explicitly — same function the `Drop` impl calls — so all
+    // exit paths converge on a single unlink site. NATEWM_MODE flag 5 (amended): SIGTERM, EOF,
+    // and Drop all route through this one cleanup function. A session restart cannot reach the
+    // stale-socket branch of `SomeblocksIntake::bind`.
+    {
+        let app_p = app.clone();
+        let feed_for_cleanup = feed.clone();
+        glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
+            if !crate::shutdown_requested() {
+                return glib::ControlFlow::Continue;
+            }
+            tracing::info!("shutdown observed; running socket cleanup + app.quit()");
+            if let Some(f) = &feed_for_cleanup {
+                f.borrow_mut().cleanup();
+            }
+            app_p.quit();
+            glib::ControlFlow::Break
+        });
+    }
+
 }
 
 fn present_bar(
@@ -143,9 +455,8 @@ fn present_bar(
     config: &Config,
     engine: &GridEngine,
     backend: &Option<Rc<RefCell<dyn WmConnection>>>,
-    feed: &Option<Rc<RefCell<SomeblocksIntake>>>,
     config_path: Option<&std::path::Path>,
-) {
+) -> Option<Bar> {
     let output_name = monitor
         .and_then(gdk::Monitor::connector)
         .map(|c| c.to_string())
@@ -186,77 +497,6 @@ fn present_bar(
 
     // Initial render so the bar isn't blank before the first event/tick (clock shows now).
     host.render_all();
-
-    // === Clock 1: WM fd. ===
-    // Wake on the WM backend's readable fd, drain its dispatch(), deliver WmEvents to the host.
-    // After every dispatch, check `closed()` — when dwl exits, the stdin backend flips this and
-    // we route through the same shutdown path as SIGTERM/SIGINT (NATEWM_MODE flag 5).
-    // NOT tied to the GTK render tick.
-    if let Some(b) = backend {
-        for ev in b.borrow().snapshot() {
-            host.deliver_event(&Event::Wm(ev));
-        }
-        let fd = b.borrow().fd();
-        let host_p = host.clone();
-        let b_p = b.clone();
-        let _fd_source = event_loop::add_fd_watch_local(fd, move || {
-            for ev in b_p.borrow_mut().dispatch() {
-                host_p.deliver_event(&Event::Wm(ev));
-            }
-            if b_p.borrow().closed() {
-                tracing::info!(
-                    "WM backend reported closed (compositor exited); requesting graceful shutdown"
-                );
-                crate::request_shutdown();
-                return glib::ControlFlow::Break;
-            }
-            glib::ControlFlow::Continue
-        });
-    }
-
-    // === Clock 2: someblocks feed fd. ===
-    // Independent of the WM watch and the GTK render tick. The listener fd becomes readable when
-    // a producer connects OR an already-connected producer writes; dispatch() handles both, and
-    // the reducer's coalesce-latest guarantees ≤1 FeedEvent::Frame per wake. If the renderer is
-    // slow, the producer is *not* back-pressured — the reducer overwrites in place. "Never
-    // blocks dwl"-style guarantee, by construction.
-    if let Some(f) = feed {
-        let fd = f.borrow().fd();
-        let host_p = host.clone();
-        let f_p = f.clone();
-        let _fd_source = event_loop::add_fd_watch_local(fd, move || {
-            for ev in f_p.borrow_mut().dispatch() {
-                host_p.deliver_event(&Event::Feed(ev));
-            }
-            if crate::shutdown_requested() {
-                return glib::ControlFlow::Break;
-            }
-            glib::ControlFlow::Continue
-        });
-    }
-
-    // === Shutdown observer. ===
-    // Polls the static SHUTDOWN_REQUESTED flag (set by signal handlers or the WM EOF observer
-    // in the Clock-1 callback above). When the flag flips, we run the *one* idempotent
-    // `SomeblocksIntake::cleanup()` explicitly — same function the `Drop` impl calls — so all
-    // exit paths converge on a single unlink site. NATEWM_MODE flag 5 (amended): SIGTERM, EOF,
-    // and Drop all route through this one cleanup function. A session restart cannot reach the
-    // stale-socket branch of `SomeblocksIntake::bind`.
-    {
-        let app_p = app.clone();
-        let feed_for_cleanup = feed.clone();
-        glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
-            if !crate::shutdown_requested() {
-                return glib::ControlFlow::Continue;
-            }
-            tracing::info!("shutdown observed; running socket cleanup + app.quit()");
-            if let Some(f) = &feed_for_cleanup {
-                f.borrow_mut().cleanup();
-            }
-            app_p.quit();
-            glib::ControlFlow::Break
-        });
-    }
 
     // Timers (clock ticks + memory/CPU pollers) are owned and reconciled by `TimerSet`, set up
     // inside `build_grid_and_host` and re-run on every structural reload — so there's no separate
@@ -312,6 +552,13 @@ fn present_bar(
         };
         crate::config_reload::watch_config(path.to_path_buf(), host.clone(), rebuild, config.clone());
     }
+
+    Some(Bar {
+        monitor: monitor.cloned(),
+        name: monitor.map(label_for_monitor).unwrap_or_else(|| "<unanchored>".to_string()),
+        window,
+        host,
+    })
 }
 
 /// Register wafflebar's bundled icon search paths so the `wb-*` glyphs (Lucide, recolored as

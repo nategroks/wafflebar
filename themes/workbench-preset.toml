@@ -1,0 +1,100 @@
+# wafflebar — retro desktop preset (Workbench / CDE).
+#
+# Drop in as `~/.config/wafflebar/config.toml` (or `wafflebar -c themes/workbench-preset.toml`).
+# Switch the two themes by editing `theme` below: "workbench" (Amiga grey + blue) or "cde"
+# (Motif blue-grey + magenta). Both are built in; see themes/workbench.css and themes/cde.css.
+#
+# GEOMETRY IS PART OF THE LOOK. The 12px Tengoku grid and the 2px bevels only stay crisp on even
+# numbers: height 26 = 2px top bevel + 22px content + 2px bottom bevel. Change the height and the
+# bevel lands on a half pixel. Install the font first — `scripts/install-fonts.sh` — or the CSS
+# silently falls back and the metrics stop lining up.
+#
+# The rest of the desktop (GTK apps, X11 apps, dwl borders) is in contrib/desktop/;
+# `scripts/install-desktop.sh` applies the whole set.
+
+schema = 1
+
+[bar]
+position = "top"
+height = 26               # 2 + 22 + 2 — see above
+theme = "workbench"       # or "cde"
+layout = "pack"
+monitor = "all"           # one bar per output; ordering comes from the monitor daemon, not here
+icon_size = 16            # pictogram scale — the CDE front panel grid
+spacing = 2               # gadgets sit shoulder to shoulder, with the bevels doing the separating
+reserve_space = true
+
+# ── left: the switcher, the layout indicator, the focused title ───────────────
+# tags reads as the CDE front-panel workspace switcher: raised boxes, the current one pressed in.
+
+[[modules]]
+type = "tags"
+cell = { row = 0, col = 0 }
+align = "start"
+
+[[modules]]
+type = "layout"
+cell = { row = 0, col = 1 }
+align = "start"
+
+[[modules]]
+type = "separator"
+cell = { row = 0, col = 2 }
+align = "start"
+style = "line"            # the 1px-dark + 1px-light chisel
+
+[[modules]]
+type = "window"
+cell = { row = 0, col = 3 }
+align = "start"
+max_chars = 60
+
+# ── centre: open windows, as Workbench-style gadget buttons ───────────────────
+
+[[modules]]
+type = "tasklist"
+cell = { row = 0, col = 4 }
+align = "center"
+max_chars = 20
+
+# ── right: gauges, tray, clock ────────────────────────────────────────────────
+# Each gauge is an inset well. The load buckets colour the label text only — no animated
+# backgrounds, which is what keeps it period-correct.
+
+[[modules]]
+type = "cpu"
+cell = { row = 0, col = 5 }
+align = "end"
+
+[[modules]]
+type = "memory"
+cell = { row = 0, col = 6 }
+align = "end"
+
+[[modules]]
+type = "network"
+cell = { row = 0, col = 7 }
+align = "end"
+max_chars = 12
+
+[[modules]]
+type = "volume"
+cell = { row = 0, col = 8 }
+align = "end"
+
+[[modules]]
+type = "statustray"
+cell = { row = 0, col = 9 }
+align = "end"
+
+[[modules]]
+type = "clock"
+cell = { row = 0, col = 10 }
+align = "end"
+# Tengoku is proportional: a seconds field visibly jitters as digit widths change. Minutes only.
+format = "%a %d %b   %H:%M"
+
+[[modules]]
+type = "showdesktop"
+cell = { row = 0, col = 11 }
+align = "end"
